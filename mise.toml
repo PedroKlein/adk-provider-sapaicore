@@ -25,13 +25,13 @@ description = "Run all checks (build + vet + lint + test)"
 depends = ["build", "vet", "lint", "test"]
 
 [tasks.smoke]
-description = "Run smoke test against real SAP AI Core"
-run = "go run ./cmd/smoke/"
+description = "Run smoke tests against real SAP AI Core"
+run = "go test -tags=smoke ./smoketest/ -v -timeout=5m"
 
 [tasks."smoke:large"]
-description = "Run smoke test with >200K token 1M context verification"
+description = "Run smoke tests with >200K token 1M context verification"
 env = { SMOKE_LARGE_CONTEXT = "1" }
-run = "go run ./cmd/smoke/"
+run = "go test -tags=smoke ./smoketest/ -v -timeout=10m -run TestSmoke_Anthropic1MContext"
 
 [tasks.tidy]
 description = "Run go mod tidy"

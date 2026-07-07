@@ -397,7 +397,7 @@ func TestFoundation_NonStreaming(t *testing.T) {
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify foundation-models URL path.
-		if want := "/v2/inference/deployments/deploy-xyz/chat/completions"; r.URL.Path != want {
+		if want := "/v2/inference/deployments/deploy-xyz/v1/chat/completions"; r.URL.Path != want {
 			t.Errorf("path = %q, want %q", r.URL.Path, want)
 		}
 
@@ -607,10 +607,12 @@ func TestOrchestration_FunctionResponseFormat(t *testing.T) {
 	}
 
 	ctx := t.Context()
+
 	for resp, err := range llm.GenerateContent(ctx, req, false) {
 		if err != nil {
 			t.Fatalf("GenerateContent: %v", err)
 		}
+
 		_ = resp
 	}
 
@@ -749,7 +751,10 @@ func TestOrchestration_ResponseFormat(t *testing.T) {
 		},
 	}
 
-	for range llm.GenerateContent(t.Context(), req, false) {
+	for _, err := range llm.GenerateContent(t.Context(), req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
 	}
 
 	cfg, _ := capturedBody["config"].(map[string]any)
@@ -808,7 +813,10 @@ func TestOrchestration_TimeoutAndRetries(t *testing.T) {
 
 	llm, _ := provider.Model("gpt-4.1")
 
-	for range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), false) {
+	for _, err := range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
 	}
 
 	cfg, _ := capturedBody["config"].(map[string]any)
@@ -849,7 +857,10 @@ func TestOrchestration_TimeoutOmittedWhenZero(t *testing.T) {
 
 	llm, _ := provider.Model("gpt-4.1")
 
-	for range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), false) {
+	for _, err := range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
 	}
 
 	cfg, _ := capturedBody["config"].(map[string]any)

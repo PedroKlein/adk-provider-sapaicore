@@ -120,13 +120,16 @@ llm, _ := provider.Model("o4-mini",
 |--------|-------------|
 | `WithEndpoint(url)` | SAP AI Core API base URL (required) |
 | `WithAuth(id, secret, authURL)` | OAuth2 credentials (required) |
-| `WithDeploymentID(id)` | Orchestration mode: single deployment for all models |
+| `WithOrchestration()` | Orchestration mode: auto-discovers deployment |
+| `WithDeploymentID(id)` | Orchestration mode: explicit deployment ID |
 | `WithDeployments(map)` | Foundation-models mode: per-model deployment IDs |
 | `WithResourceGroup(group)` | Resource group (default: `"default"`) |
 | `WithHTTPClient(client)` | Custom `*http.Client` |
 | `WithHeaders(headers)` | Extra HTTP headers on every request |
+| `WithTimeout(seconds)` | Server-side LLM timeout (1-1200s) |
+| `WithMaxRetries(n)` | Server-side retry count (0-5) |
 
-Exactly one of `WithDeploymentID` or `WithDeployments` is required.
+Exactly one of `WithOrchestration`, `WithDeploymentID`, or `WithDeployments` is required.
 
 ### Model options
 
@@ -139,8 +142,6 @@ Exactly one of `WithDeploymentID` or `WithDeployments` is required.
 ```go
 sapaicore.ErrMissingConfig      // required option not provided
 sapaicore.ErrDeploymentNotFound // model name not in Deployments map (foundation mode only)
-sapaicore.ErrTokenRefresh       // OAuth2 token fetch failed
-sapaicore.ErrInference          // inference request failed
 sapaicore.ErrDiscovery          // orchestration deployment auto-discovery failed
 ```
 
@@ -188,6 +189,16 @@ go vet ./...
 golangci-lint run ./...
 go test -race ./...
 ```
+
+### Smoke tests
+
+Integration tests against a live SAP AI Core instance. They cover both API modes, streaming, tool calling, extended thinking, and the full ADK agent loop.
+
+```bash
+go test -tags=smoke ./smoketest/ -v -timeout=5m
+```
+
+See [`smoketest/README.md`](smoketest/README.md) for credentials setup and the full test catalog.
 
 ## License
 

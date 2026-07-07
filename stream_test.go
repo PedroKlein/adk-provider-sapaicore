@@ -276,7 +276,10 @@ func TestOrchestration_StreamIncludesUsageOption(t *testing.T) {
 
 	llm, _ := provider.Model("gpt-4.1")
 
-	for range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), true) {
+	for _, err := range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), true) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
 	}
 
 	// Verify stream_options injected in model params.
