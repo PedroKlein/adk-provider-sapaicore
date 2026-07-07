@@ -14,10 +14,10 @@ import (
 
 	"google.golang.org/adk/v2/model"
 
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/convert"
-	oai "github.com/PedroKlein/go-adk-sap-ai-core/internal/openai"
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/request"
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/stream"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/convert"
+	oai "github.com/PedroKlein/adk-provider-sapaicore/internal/openai"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/request"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/stream"
 )
 
 // ErrInference indicates an inference request error.

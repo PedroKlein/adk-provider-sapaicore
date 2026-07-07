@@ -1,4 +1,4 @@
-module github.com/PedroKlein/go-adk-sap-ai-core
+module github.com/PedroKlein/adk-provider-sapaicore
 
 go 1.25.0
 

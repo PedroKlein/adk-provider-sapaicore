@@ -1,4 +1,4 @@
-# go-adk-sap-ai-core
+# adk-provider-sapaicore
 
 ADK Go v2 model provider for [SAP AI Core](https://help.sap.com/docs/sap-ai-core/generative-ai/generative-ai-hub).
 
@@ -7,7 +7,7 @@ Implements [`model.LLM`](https://github.com/google/adk-go) so any ADK agent can 
 ## Install
 
 ```bash
-go get github.com/PedroKlein/go-adk-sap-ai-core
+go get github.com/PedroKlein/adk-provider-sapaicore
 ```
 
 Requires Go 1.25+.

@@ -10,8 +10,8 @@ import (
 
 	"google.golang.org/adk/v2/model"
 
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/convert"
-	oai "github.com/PedroKlein/go-adk-sap-ai-core/internal/openai"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/convert"
+	oai "github.com/PedroKlein/adk-provider-sapaicore/internal/openai"
 )
 
 // Mode distinguishes how chunks are wrapped on the wire.

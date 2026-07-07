@@ -9,9 +9,9 @@ import (
 
 	"google.golang.org/adk/v2/model"
 
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/auth"
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/foundation"
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/orchestration"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/auth"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/foundation"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/orchestration"
 )
 
 // Sentinel errors.

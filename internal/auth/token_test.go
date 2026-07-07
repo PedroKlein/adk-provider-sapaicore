@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/auth"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/auth"
 )
 
 func TestTokenCache_CachesValidToken(t *testing.T) {

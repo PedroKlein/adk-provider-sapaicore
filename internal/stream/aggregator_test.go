@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/stream"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/stream"
 )
 
 func TestParseSSELine(t *testing.T) {

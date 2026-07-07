@@ -5,9 +5,9 @@ import (
 
 	"google.golang.org/genai"
 
-	oai "github.com/PedroKlein/go-adk-sap-ai-core/internal/openai"
+	oai "github.com/PedroKlein/adk-provider-sapaicore/internal/openai"
 
-	"github.com/PedroKlein/go-adk-sap-ai-core/internal/convert"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/convert"
 )
 
 func TestMapRole(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 
 	"google.golang.org/genai"
 
-	oai "github.com/PedroKlein/go-adk-sap-ai-core/internal/openai"
+	oai "github.com/PedroKlein/adk-provider-sapaicore/internal/openai"
 )
 
 // Schema transforms a genai.Schema into an OpenAI-compatible JSON Schema map.

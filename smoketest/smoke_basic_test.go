@@ -9,7 +9,7 @@ import (
 
 	"google.golang.org/genai"
 
-	sapaicore "github.com/PedroKlein/go-adk-sap-ai-core"
+	sapaicore "github.com/PedroKlein/adk-provider-sapaicore"
 	"google.golang.org/adk/v2/model"
 )
 

@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/genai"
 
-	oai "github.com/PedroKlein/go-adk-sap-ai-core/internal/openai"
+	oai "github.com/PedroKlein/adk-provider-sapaicore/internal/openai"
 )
 
 // Messages converts a system instruction and content list into OpenAI chat messages.
