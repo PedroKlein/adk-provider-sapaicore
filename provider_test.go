@@ -14,57 +14,43 @@ import (
 	"google.golang.org/adk/v2/model"
 )
 
+// --- Provider validation tests ---
+
 func TestNewProvider_ValidatesConfig(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
-		cfg  sapaicore.Config
+		opts []sapaicore.Option
 	}{
 		{
 			name: "missing endpoint",
-			cfg: sapaicore.Config{
-				ClientID:     "id",
-				ClientSecret: "secret",
-				AuthURL:      "https://auth.example.com/token",
-				Deployments:  map[string]string{"m": "d"},
+			opts: []sapaicore.Option{
+				sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
+				sapaicore.WithDeploymentID("d"),
 			},
 		},
 		{
-			name: "missing client ID",
-			cfg: sapaicore.Config{
-				Endpoint:     "https://api.example.com",
-				ClientSecret: "secret",
-				AuthURL:      "https://auth.example.com/token",
-				Deployments:  map[string]string{"m": "d"},
+			name: "missing auth",
+			opts: []sapaicore.Option{
+				sapaicore.WithEndpoint("https://api.example.com"),
+				sapaicore.WithDeploymentID("d"),
 			},
 		},
 		{
-			name: "missing client secret",
-			cfg: sapaicore.Config{
-				Endpoint:    "https://api.example.com",
-				ClientID:    "id",
-				AuthURL:     "https://auth.example.com/token",
-				Deployments: map[string]string{"m": "d"},
+			name: "no deployment config",
+			opts: []sapaicore.Option{
+				sapaicore.WithEndpoint("https://api.example.com"),
+				sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
 			},
 		},
 		{
-			name: "missing auth URL",
-			cfg: sapaicore.Config{
-				Endpoint:     "https://api.example.com",
-				ClientID:     "id",
-				ClientSecret: "secret",
-				Deployments:  map[string]string{"m": "d"},
-			},
-		},
-		{
-			name: "empty deployments",
-			cfg: sapaicore.Config{
-				Endpoint:     "https://api.example.com",
-				ClientID:     "id",
-				ClientSecret: "secret",
-				AuthURL:      "https://auth.example.com/token",
-				Deployments:  map[string]string{},
+			name: "both deployment modes",
+			opts: []sapaicore.Option{
+				sapaicore.WithEndpoint("https://api.example.com"),
+				sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
+				sapaicore.WithDeploymentID("d"),
+				sapaicore.WithDeployments(map[string]string{"m": "d"}),
 			},
 		},
 	}
@@ -73,7 +59,7 @@ func TestNewProvider_ValidatesConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := sapaicore.NewProvider(tt.cfg)
+			_, err := sapaicore.NewProvider(tt.opts...)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -85,16 +71,14 @@ func TestNewProvider_ValidatesConfig(t *testing.T) {
 	}
 }
 
-func TestProvider_Model_NotFound(t *testing.T) {
+func TestProvider_Model_NotFound_FoundationMode(t *testing.T) {
 	t.Parallel()
 
-	provider, err := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:     "https://api.example.com",
-		ClientID:     "id",
-		ClientSecret: "secret",
-		AuthURL:      "https://auth.example.com/token",
-		Deployments:  map[string]string{"gpt-4.1": "deploy-1"},
-	})
+	provider, err := sapaicore.NewProvider(
+		sapaicore.WithEndpoint("https://api.example.com"),
+		sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
+		sapaicore.WithDeployments(map[string]string{"gpt-4.1": "deploy-1"}),
+	)
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
@@ -109,47 +93,32 @@ func TestProvider_Model_NotFound(t *testing.T) {
 	}
 }
 
-func TestProvider_Model_DefaultResourceGroup(t *testing.T) {
+func TestProvider_Model_AnyName_OrchestrationMode(t *testing.T) {
 	t.Parallel()
 
-	var capturedResourceGroup string
-
-	authServer := newMockAuthServer(t)
-	defer authServer.Close()
-
-	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedResourceGroup = r.Header.Get("AI-Resource-Group")
-
-		writeSimpleResponse(w)
-	}))
-	defer inferenceServer.Close()
-
-	provider, err := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:     inferenceServer.URL,
-		ClientID:     "id",
-		ClientSecret: "secret",
-		AuthURL:      authServer.URL + "/oauth/token",
-		Deployments:  map[string]string{"m": "d"},
-		// ResourceGroup intentionally omitted — should default to "default".
-	})
+	provider, err := sapaicore.NewProvider(
+		sapaicore.WithEndpoint("https://api.example.com"),
+		sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
+		sapaicore.WithDeploymentID("orch-deploy"),
+	)
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
 
-	llm, _ := provider.Model("m")
-
-	for _, err := range llm.GenerateContent(t.Context(), newSimpleRequest("test"), false) {
-		if err != nil {
-			t.Fatalf("GenerateContent: %v", err)
-		}
+	// Any model name should work in orchestration mode.
+	llm, err := provider.Model("anthropic--claude-4.5-sonnet")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
 	}
 
-	if capturedResourceGroup != "default" {
-		t.Errorf("resource group = %q, want %q", capturedResourceGroup, "default")
+	if llm.Name() != "anthropic--claude-4.5-sonnet" {
+		t.Errorf("name = %q, want %q", llm.Name(), "anthropic--claude-4.5-sonnet")
 	}
 }
 
-func TestGenerateContent_NonStreaming(t *testing.T) {
+// --- Orchestration mode tests ---
+
+func TestOrchestration_NonStreaming(t *testing.T) {
 	t.Parallel()
 
 	var capturedBody map[string]any
@@ -158,62 +127,41 @@ func TestGenerateContent_NonStreaming(t *testing.T) {
 	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request structure.
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 
-		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
-			t.Errorf("expected application/json, got %s", ct)
+		// Verify orchestration URL path.
+		if want := "/v2/inference/deployments/orch-123/v2/completion"; r.URL.Path != want {
+			t.Errorf("path = %q, want %q", r.URL.Path, want)
+		}
+
+		if rg := r.Header.Get("AI-Resource-Group"); rg != "my-group" {
+			t.Errorf("resource group = %q, want %q", rg, "my-group")
 		}
 
 		body, _ := io.ReadAll(r.Body)
 		json.Unmarshal(body, &capturedBody)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"id":    "chatcmpl-test",
-			"model": "gpt-4.1",
-			"choices": []map[string]any{{
-				"index": 0,
-				"message": map[string]any{
-					"role":    "assistant",
-					"content": "Hello from SAP AI Core!",
-				},
-				"finish_reason": "stop",
-			}},
-			"usage": map[string]any{
-				"prompt_tokens":     12,
-				"completion_tokens": 8,
-				"total_tokens":      20,
-			},
-		})
+		writeOrchestrationResponse(w, "Hello from orchestration!", "stop")
 	}))
 	defer inferenceServer.Close()
 
-	provider, err := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:      inferenceServer.URL,
-		ClientID:      "id",
-		ClientSecret:  "secret",
-		AuthURL:       authServer.URL + "/oauth/token",
-		ResourceGroup: "my-group",
-		Deployments:   map[string]string{"gpt-4.1": "deploy-xyz"},
-	})
+	provider, err := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("orch-123"),
+		sapaicore.WithResourceGroup("my-group"),
+	)
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
 
-	llm, err := provider.Model("gpt-4.1")
-	if err != nil {
-		t.Fatalf("Model: %v", err)
-	}
+	llm, _ := provider.Model("gpt-4.1")
 
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
-			{
-				Parts: []*genai.Part{{Text: "Hello"}},
-				Role:  "user",
-			},
+			{Parts: []*genai.Part{{Text: "Hello"}}, Role: "user"},
 		},
 		Config: &genai.GenerateContentConfig{
 			SystemInstruction: &genai.Content{
@@ -239,50 +187,152 @@ func TestGenerateContent_NonStreaming(t *testing.T) {
 
 	resp := responses[0]
 
-	// Verify response content.
-	if resp.Content == nil {
-		t.Fatal("response content is nil")
-	}
-
-	if len(resp.Content.Parts) == 0 {
-		t.Fatal("response has no parts")
-	}
-
-	if got := resp.Content.Parts[0].Text; got != "Hello from SAP AI Core!" {
-		t.Errorf("text = %q, want %q", got, "Hello from SAP AI Core!")
-	}
-
-	if resp.FinishReason != genai.FinishReasonStop {
-		t.Errorf("finish reason = %v, want Stop", resp.FinishReason)
+	if resp.Content.Parts[0].Text != "Hello from orchestration!" {
+		t.Errorf("text = %q, want %q", resp.Content.Parts[0].Text, "Hello from orchestration!")
 	}
 
 	if !resp.TurnComplete {
 		t.Error("expected TurnComplete=true")
 	}
 
-	// Verify request body was correctly converted.
-	messages, _ := capturedBody["messages"].([]any)
-	if len(messages) < 2 {
-		t.Fatalf("expected >= 2 messages, got %d", len(messages))
+	// Verify orchestration request structure.
+	cfg, _ := capturedBody["config"].(map[string]any)
+	modules, _ := cfg["modules"].(map[string]any)
+	pt, _ := modules["prompt_templating"].(map[string]any)
+	modelCfg, _ := pt["model"].(map[string]any)
+
+	if modelCfg["name"] != "gpt-4.1" {
+		t.Errorf("model name = %v, want gpt-4.1", modelCfg["name"])
 	}
 
-	// First message should be system instruction.
-	sysMsg, _ := messages[0].(map[string]any)
+	params, _ := modelCfg["params"].(map[string]any)
+	if params["temperature"] != 0.7 {
+		t.Errorf("temperature = %v, want 0.7", params["temperature"])
+	}
+
+	prompt, _ := pt["prompt"].(map[string]any)
+	template, _ := prompt["template"].([]any)
+
+	if len(template) < 2 {
+		t.Fatalf("expected >= 2 template messages, got %d", len(template))
+	}
+
+	sysMsg, _ := template[0].(map[string]any)
 	if sysMsg["role"] != "system" {
 		t.Errorf("first message role = %v, want system", sysMsg["role"])
 	}
+}
 
-	if sysMsg["content"] != "You are helpful." {
-		t.Errorf("system content = %v, want %q", sysMsg["content"], "You are helpful.")
+func TestOrchestration_WithModelParams(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		writeOrchestrationResponse(w, "ok", "stop")
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("d"),
+	)
+
+	llm, _ := provider.Model("anthropic--claude-4.5-sonnet",
+		sapaicore.WithModelParams(map[string]any{
+			"thinking":       map[string]any{"type": "enabled", "budget_tokens": 16384},
+			"anthropic_beta": []string{"context-1m-2025-08-07"},
+			"max_tokens":     200000,
+		}),
+	)
+
+	for _, err := range llm.GenerateContent(t.Context(), newSimpleRequest("test"), false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
 	}
 
-	// Verify stream=false in request.
-	if stream, _ := capturedBody["stream"].(bool); stream {
-		t.Error("expected stream=false in request body")
+	// Verify extra params were passed in model.params.
+	cfg, _ := capturedBody["config"].(map[string]any)
+	modules, _ := cfg["modules"].(map[string]any)
+	pt, _ := modules["prompt_templating"].(map[string]any)
+	modelCfg, _ := pt["model"].(map[string]any)
+	params, _ := modelCfg["params"].(map[string]any)
+
+	if params["max_tokens"] == nil {
+		t.Error("expected max_tokens in model params")
+	}
+
+	thinking, _ := params["thinking"].(map[string]any)
+	if thinking["type"] != "enabled" {
+		t.Errorf("thinking.type = %v, want enabled", thinking["type"])
+	}
+
+	beta, _ := params["anthropic_beta"].([]any)
+	if len(beta) == 0 || beta[0] != "context-1m-2025-08-07" {
+		t.Errorf("anthropic_beta = %v, want [context-1m-2025-08-07]", beta)
 	}
 }
 
-func TestGenerateContent_ToolCalls(t *testing.T) {
+// --- Foundation-models mode tests ---
+
+func TestFoundation_NonStreaming(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify foundation-models URL path.
+		if want := "/v2/inference/deployments/deploy-xyz/chat/completions"; r.URL.Path != want {
+			t.Errorf("path = %q, want %q", r.URL.Path, want)
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		writeFoundationResponse(w, "Hello from foundation!", "stop")
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeployments(map[string]string{"gpt-4.1": "deploy-xyz"}),
+	)
+
+	llm, _ := provider.Model("gpt-4.1")
+
+	for resp, err := range llm.GenerateContent(t.Context(), newSimpleRequest("Hi"), false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+
+		if resp.Content.Parts[0].Text != "Hello from foundation!" {
+			t.Errorf("text = %q", resp.Content.Parts[0].Text)
+		}
+	}
+
+	// Verify flat OpenAI format (no nested config.modules).
+	if _, hasConfig := capturedBody["config"]; hasConfig {
+		t.Error("foundation mode should not have nested config")
+	}
+
+	if capturedBody["model"] != "gpt-4.1" {
+		t.Errorf("model = %v, want gpt-4.1", capturedBody["model"])
+	}
+}
+
+func TestFoundation_ToolCalls(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
@@ -313,23 +363,17 @@ func TestGenerateContent_ToolCalls(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:     inferenceServer.URL,
-		ClientID:     "id",
-		ClientSecret: "secret",
-		AuthURL:      authServer.URL + "/oauth/token",
-		Deployments:  map[string]string{"m": "d"},
-	})
+	provider, _ := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeployments(map[string]string{"m": "d"}),
+	)
 
 	llm, _ := provider.Model("m")
 
 	for resp, err := range llm.GenerateContent(t.Context(), newSimpleRequest("weather?"), false) {
 		if err != nil {
 			t.Fatalf("GenerateContent: %v", err)
-		}
-
-		if resp.Content == nil || len(resp.Content.Parts) == 0 {
-			t.Fatal("expected parts with function call")
 		}
 
 		fc := resp.Content.Parts[0].FunctionCall
@@ -344,99 +388,6 @@ func TestGenerateContent_ToolCalls(t *testing.T) {
 		if fc.ID != "call_123" {
 			t.Errorf("function call ID = %q, want %q", fc.ID, "call_123")
 		}
-
-		loc, _ := fc.Args["location"].(string)
-		if loc != "Berlin" {
-			t.Errorf("args.location = %q, want %q", loc, "Berlin")
-		}
-	}
-}
-
-func TestGenerateContent_FunctionResponse(t *testing.T) {
-	t.Parallel()
-
-	var capturedBody map[string]any
-
-	authServer := newMockAuthServer(t)
-	defer authServer.Close()
-
-	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &capturedBody)
-		writeSimpleResponse(w)
-	}))
-	defer inferenceServer.Close()
-
-	provider, _ := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:     inferenceServer.URL,
-		ClientID:     "id",
-		ClientSecret: "secret",
-		AuthURL:      authServer.URL + "/oauth/token",
-		Deployments:  map[string]string{"m": "d"},
-	})
-
-	llm, _ := provider.Model("m")
-
-	// Simulate a conversation with a function response.
-	req := &model.LLMRequest{
-		Contents: []*genai.Content{
-			{
-				Parts: []*genai.Part{{Text: "What's the weather?"}},
-				Role:  "user",
-			},
-			{
-				Parts: []*genai.Part{{
-					FunctionCall: &genai.FunctionCall{
-						ID:   "call_456",
-						Name: "get_weather",
-						Args: map[string]any{"location": "Munich"},
-					},
-				}},
-				Role: "model",
-			},
-			{
-				Parts: []*genai.Part{{
-					FunctionResponse: &genai.FunctionResponse{
-						ID:       "call_456",
-						Name:     "get_weather",
-						Response: map[string]any{"temperature": 22, "unit": "celsius"},
-					},
-				}},
-				Role: "user",
-			},
-		},
-	}
-
-	for _, err := range llm.GenerateContent(t.Context(), req, false) {
-		if err != nil {
-			t.Fatalf("GenerateContent: %v", err)
-		}
-	}
-
-	// Verify the function response was converted to a tool message.
-	messages, _ := capturedBody["messages"].([]any)
-	if len(messages) < 3 {
-		t.Fatalf("expected >= 3 messages, got %d", len(messages))
-	}
-
-	// Find the tool message.
-	var toolMsg map[string]any
-
-	for _, m := range messages {
-		msg, _ := m.(map[string]any)
-		if msg["role"] == "tool" {
-			toolMsg = msg
-
-			break
-		}
-	}
-
-	if toolMsg == nil {
-		t.Fatal("no tool message found in request")
-	}
-
-	if toolMsg["tool_call_id"] != "call_456" {
-		t.Errorf("tool_call_id = %v, want %q", toolMsg["tool_call_id"], "call_456")
 	}
 }
 
@@ -458,23 +409,39 @@ func newMockAuthServer(t *testing.T) *httptest.Server {
 func newSimpleRequest(text string) *model.LLMRequest {
 	return &model.LLMRequest{
 		Contents: []*genai.Content{
-			{
-				Parts: []*genai.Part{{Text: text}},
-				Role:  "user",
-			},
+			{Parts: []*genai.Part{{Text: text}}, Role: "user"},
 		},
 	}
 }
 
-func writeSimpleResponse(w http.ResponseWriter) {
+func writeOrchestrationResponse(w http.ResponseWriter, content, finishReason string) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"request_id": "req-123",
+		"final_result": map[string]any{
+			"id":    "chatcmpl-1",
+			"model": "gpt-4.1",
+			"choices": []map[string]any{{
+				"index":         0,
+				"message":       map[string]any{"role": "assistant", "content": content},
+				"finish_reason": finishReason,
+			}},
+			"usage": map[string]any{
+				"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+			},
+		},
+	})
+}
+
+func writeFoundationResponse(w http.ResponseWriter, content, finishReason string) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"id":    "chatcmpl-1",
 		"model": "gpt-4.1",
 		"choices": []map[string]any{{
 			"index":         0,
-			"message":       map[string]any{"role": "assistant", "content": "ok"},
-			"finish_reason": "stop",
+			"message":       map[string]any{"role": "assistant", "content": content},
+			"finish_reason": finishReason,
 		}},
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -17,62 +18,64 @@ import (
 
 var _ model.LLM = (*sapModel)(nil)
 
-// sapModel implements model.LLM for SAP AI Core deployments.
 type sapModel struct {
 	name          string
 	deploymentID  string
 	endpoint      string
 	resourceGroup string
+	headers       http.Header
 	auth          *tokenCache
 	httpClient    *http.Client
+	mode          mode
+	extraParams   map[string]any
 }
 
 func (m *sapModel) Name() string {
 	return m.name
 }
 
-// GenerateContent calls SAP AI Core's OpenAI-compatible chat completions endpoint.
 func (m *sapModel) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
-	chatReq := convertRequest(req, m.requestModel(req))
-	chatReq.Stream = stream
-
 	if stream {
-		return m.generateStream(ctx, chatReq)
+		return m.generateStream(ctx, req)
 	}
 
-	return m.generate(ctx, chatReq)
+	return m.generate(ctx, req)
 }
 
-// requestModel determines the model name to send in the request.
-// Prefers req.Model (set by BeforeModelCallback) over the construction-time name.
-func (m *sapModel) requestModel(req *model.LLMRequest) string {
-	if req.Model != "" {
-		return req.Model
-	}
-
-	return m.name
-}
-
-// generate performs a non-streaming chat completion request.
-func (m *sapModel) generate(ctx context.Context, chatReq chatRequest) iter.Seq2[*model.LLMResponse, error] {
+func (m *sapModel) generate(ctx context.Context, req *model.LLMRequest) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		resp, err := m.doRequest(ctx, chatReq)
+		body := m.buildRequestBody(req, false)
+
+		httpResp, err := m.doHTTPRequest(ctx, body)
 		if err != nil {
 			yield(nil, err)
 			return
 		}
 
-		llmResp := convertResponse(resp)
+		defer func() { _ = httpResp.Body.Close() }()
+
+		if httpResp.StatusCode != http.StatusOK {
+			yield(nil, m.handleErrorResponse(httpResp))
+			return
+		}
+
+		llmResp, err := m.parseResponse(httpResp)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+
 		llmResp.TurnComplete = true
 
 		yield(llmResp, nil)
 	}
 }
 
-// generateStream performs a streaming chat completion request using SSE.
-func (m *sapModel) generateStream(ctx context.Context, chatReq chatRequest) iter.Seq2[*model.LLMResponse, error] {
+func (m *sapModel) generateStream(ctx context.Context, req *model.LLMRequest) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		httpResp, err := m.doHTTPRequest(ctx, chatReq)
+		body := m.buildRequestBody(req, true)
+
+		httpResp, err := m.doHTTPRequest(ctx, body)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -90,9 +93,7 @@ func (m *sapModel) generateStream(ctx context.Context, chatReq chatRequest) iter
 		scanner := bufio.NewScanner(httpResp.Body)
 
 		for scanner.Scan() {
-			line := scanner.Text()
-
-			data, ok := parseSSELine(line)
+			data, ok := parseSSELine(scanner.Text())
 			if !ok {
 				continue
 			}
@@ -101,7 +102,7 @@ func (m *sapModel) generateStream(ctx context.Context, chatReq chatRequest) iter
 				break
 			}
 
-			partial := agg.processChunk(data)
+			partial := agg.processChunk(m.mode, data)
 			if partial != nil {
 				if !yield(partial, nil) {
 					return
@@ -118,7 +119,239 @@ func (m *sapModel) generateStream(ctx context.Context, chatReq chatRequest) iter
 	}
 }
 
-// streamAggregator accumulates streaming chunks into a final response.
+func (m *sapModel) buildRequestBody(req *model.LLMRequest, stream bool) []byte {
+	var (
+		systemInstruction *genai.Content
+		tools             []*genai.Tool
+		temperature       *float32
+		maxTokens         int32
+		topP              *float32
+		stop              []string
+	)
+
+	if req.Config != nil {
+		systemInstruction = req.Config.SystemInstruction
+		tools = req.Config.Tools
+		temperature = req.Config.Temperature
+		maxTokens = req.Config.MaxOutputTokens
+		topP = req.Config.TopP
+		stop = req.Config.StopSequences
+	}
+
+	messages := convertMessages(systemInstruction, req.Contents)
+	toolDefs := convertTools(tools)
+	modelName := m.requestModel(req)
+
+	switch m.mode {
+	case modeOrchestration:
+		return m.buildOrchestrationBody(modelName, messages, toolDefs, temperature, maxTokens, topP, stop, stream)
+	default:
+		return m.buildFoundationBody(modelName, messages, toolDefs, temperature, maxTokens, topP, stop, stream)
+	}
+}
+
+func (m *sapModel) buildOrchestrationBody(
+	modelName string,
+	messages []chatMessage,
+	tools []toolDef,
+	temperature *float32,
+	maxTokens int32,
+	topP *float32,
+	stop []string,
+	stream bool,
+) []byte {
+	params := make(map[string]any)
+
+	if temperature != nil {
+		params["temperature"] = *temperature
+	}
+
+	if maxTokens > 0 {
+		params["max_tokens"] = maxTokens
+	}
+
+	if topP != nil {
+		params["top_p"] = *topP
+	}
+
+	if len(stop) > 0 {
+		params["stop"] = stop
+	}
+
+	maps.Copy(params, m.extraParams)
+
+	orchReq := orchestrationRequest{
+		Config: orchestrationConfig{
+			Modules: moduleConfigs{
+				PromptTemplating: promptTemplatingModule{
+					Prompt: promptConfig{
+						Template: messages,
+						Tools:    tools,
+					},
+					Model: modelDef{
+						Name:    modelName,
+						Version: "latest",
+						Params:  params,
+					},
+				},
+			},
+		},
+	}
+
+	if stream {
+		orchReq.Config.Stream = &streamConfig{Enabled: true}
+	}
+
+	body, _ := json.Marshal(orchReq)
+
+	return body
+}
+
+func (m *sapModel) buildFoundationBody(
+	modelName string,
+	messages []chatMessage,
+	tools []toolDef,
+	temperature *float32,
+	maxTokens int32,
+	topP *float32,
+	stop []string,
+	stream bool,
+) []byte {
+	fr := foundationRequest{
+		Model:       modelName,
+		Messages:    messages,
+		Tools:       tools,
+		Stream:      stream,
+		Temperature: temperature,
+		TopP:        topP,
+		Stop:        stop,
+	}
+
+	if maxTokens > 0 {
+		fr.MaxTokens = &maxTokens
+	}
+
+	body, _ := json.Marshal(fr)
+
+	return body
+}
+
+func (m *sapModel) parseResponse(resp *http.Response) (*model.LLMResponse, error) {
+	switch m.mode {
+	case modeOrchestration:
+		var orchResp orchestrationResponse
+		if err := json.NewDecoder(resp.Body).Decode(&orchResp); err != nil {
+			return nil, fmt.Errorf("decoding orchestration response: %w", ErrInference)
+		}
+
+		if orchResp.FinalResult == nil {
+			return &model.LLMResponse{
+				Content: &genai.Content{Parts: []*genai.Part{}, Role: "model"},
+			}, nil
+		}
+
+		return m.convertFoundationResponse(orchResp.FinalResult), nil
+
+	default:
+		var fResp foundationResponse
+		if err := json.NewDecoder(resp.Body).Decode(&fResp); err != nil {
+			return nil, fmt.Errorf("decoding response: %w", ErrInference)
+		}
+
+		return m.convertFoundationResponse(&fResp), nil
+	}
+}
+
+func (m *sapModel) convertFoundationResponse(resp *foundationResponse) *model.LLMResponse {
+	if resp.Error != nil {
+		return &model.LLMResponse{
+			ErrorCode:    resp.Error.Code,
+			ErrorMessage: resp.Error.Message,
+		}
+	}
+
+	if len(resp.Choices) == 0 {
+		return &model.LLMResponse{
+			Content: &genai.Content{Parts: []*genai.Part{}, Role: "model"},
+		}
+	}
+
+	return convertChoiceToResponse(resp.Choices[0], resp.Usage, resp.Model)
+}
+
+// requestModel prefers req.Model (set by BeforeModelCallback) over the construction-time name.
+func (m *sapModel) requestModel(req *model.LLMRequest) string {
+	if req.Model != "" {
+		return req.Model
+	}
+
+	return m.name
+}
+
+func (m *sapModel) requestURL() string {
+	switch m.mode {
+	case modeOrchestration:
+		return fmt.Sprintf("%s/v2/inference/deployments/%s/v2/completion", m.endpoint, m.deploymentID)
+	default:
+		return fmt.Sprintf("%s/v2/inference/deployments/%s/chat/completions", m.endpoint, m.deploymentID)
+	}
+}
+
+func (m *sapModel) doHTTPRequest(ctx context.Context, body []byte) (*http.Response, error) {
+	token, err := m.auth.getToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.requestURL(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", ErrInference)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("AI-Resource-Group", m.resourceGroup)
+
+	for key, values := range m.headers {
+		for _, v := range values {
+			req.Header.Add(key, v)
+		}
+	}
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("executing request: %w", ErrInference)
+	}
+
+	return resp, nil
+}
+
+func (m *sapModel) handleErrorResponse(resp *http.Response) error {
+	switch m.mode {
+	case modeOrchestration:
+		var errResp struct {
+			Error struct {
+				Message string `json:"message"`
+				Code    int    `json:"code"`
+			} `json:"error"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error.Message != "" {
+			return fmt.Errorf("orchestration error %d: %s: %w", resp.StatusCode, errResp.Error.Message, ErrInference)
+		}
+
+	default:
+		var errResp foundationResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != nil {
+			return fmt.Errorf("API error %d: %s: %w", resp.StatusCode, errResp.Error.Message, ErrInference)
+		}
+	}
+
+	return fmt.Errorf("API returned status %d: %w", resp.StatusCode, ErrInference)
+}
+
+// --- Streaming ---
+
 type streamAggregator struct {
 	textBuf   strings.Builder
 	toolCalls []toolCall
@@ -127,27 +360,48 @@ type streamAggregator struct {
 	finishRsn string
 }
 
-// processChunk handles a single SSE data payload. Returns a partial response if
-// there is text content to emit, otherwise returns nil.
-func (a *streamAggregator) processChunk(data string) *model.LLMResponse {
-	var chunk chatChunk
-	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+func (a *streamAggregator) processChunk(m mode, data string) *model.LLMResponse {
+	var (
+		choices  []chunkChoice
+		usage    *chatUsage
+		modelVer string
+	)
+
+	switch m {
+	case modeOrchestration:
+		var chunk orchestrationChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil || chunk.FinalResult == nil {
+			return nil
+		}
+
+		choices = chunk.FinalResult.Choices
+		usage = chunk.FinalResult.Usage
+		modelVer = chunk.FinalResult.Model
+
+	default:
+		var chunk foundationChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return nil
+		}
+
+		choices = chunk.Choices
+		usage = chunk.Usage
+		modelVer = chunk.Model
+	}
+
+	if modelVer != "" {
+		a.modelVer = modelVer
+	}
+
+	if usage != nil {
+		a.usage = usage
+	}
+
+	if len(choices) == 0 {
 		return nil
 	}
 
-	if chunk.Model != "" {
-		a.modelVer = chunk.Model
-	}
-
-	if chunk.Usage != nil {
-		a.usage = chunk.Usage
-	}
-
-	if len(chunk.Choices) == 0 {
-		return nil
-	}
-
-	choice := chunk.Choices[0]
+	choice := choices[0]
 
 	if choice.FinishReason != "" {
 		a.finishRsn = choice.FinishReason
@@ -172,83 +426,33 @@ func (a *streamAggregator) processChunk(data string) *model.LLMResponse {
 	}
 }
 
-// finalize returns the final aggregated response after streaming completes.
 func (a *streamAggregator) finalize() *model.LLMResponse {
-	return buildFinalResponse(a.textBuf.String(), a.toolCalls, a.finishRsn, a.usage, a.modelVer)
+	var parts []*genai.Part
+
+	if a.textBuf.Len() > 0 {
+		parts = append(parts, &genai.Part{Text: a.textBuf.String()})
+	}
+
+	for _, tc := range a.toolCalls {
+		parts = append(parts, convertToolCallToPart(tc))
+	}
+
+	if len(parts) == 0 {
+		parts = []*genai.Part{}
+	}
+
+	return &model.LLMResponse{
+		Content: &genai.Content{
+			Parts: parts,
+			Role:  "model",
+		},
+		FinishReason:  mapFinishReason(a.finishRsn),
+		UsageMetadata: convertUsage(a.usage),
+		ModelVersion:  a.modelVer,
+		TurnComplete:  true,
+	}
 }
 
-// parseSSELine extracts the data payload from an SSE line.
-func parseSSELine(line string) (string, bool) {
-	if !strings.HasPrefix(line, "data: ") {
-		return "", false
-	}
-
-	return strings.TrimPrefix(line, "data: "), true
-}
-
-// doRequest performs a non-streaming HTTP request and decodes the response.
-func (m *sapModel) doRequest(ctx context.Context, chatReq chatRequest) (*chatResponse, error) {
-	httpResp, err := m.doHTTPRequest(ctx, chatReq)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() { _ = httpResp.Body.Close() }()
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, m.handleErrorResponse(httpResp)
-	}
-
-	var resp chatResponse
-	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", ErrInference)
-	}
-
-	return &resp, nil
-}
-
-// doHTTPRequest builds and sends the HTTP request to SAP AI Core.
-func (m *sapModel) doHTTPRequest(ctx context.Context, chatReq chatRequest) (*http.Response, error) {
-	token, err := m.auth.getToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	body, err := json.Marshal(chatReq)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling request: %w", ErrInference)
-	}
-
-	url := fmt.Sprintf("%s/v2/inference/deployments/%s/chat/completions", m.endpoint, m.deploymentID)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", ErrInference)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("AI-Resource-Group", m.resourceGroup)
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("executing request: %w", ErrInference)
-	}
-
-	return resp, nil
-}
-
-// handleErrorResponse reads the error body and returns a structured error.
-func (m *sapModel) handleErrorResponse(resp *http.Response) error {
-	var errResp chatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != nil {
-		return fmt.Errorf("API error %d: %s: %w", resp.StatusCode, errResp.Error.Message, ErrInference)
-	}
-
-	return fmt.Errorf("API returned status %d: %w", resp.StatusCode, ErrInference)
-}
-
-// mergeToolCallDeltas merges streaming tool call deltas into accumulated tool calls.
 func mergeToolCallDeltas(accumulated, deltas []toolCall) []toolCall {
 	for _, delta := range deltas {
 		idx := delta.Index
@@ -273,30 +477,10 @@ func mergeToolCallDeltas(accumulated, deltas []toolCall) []toolCall {
 	return accumulated
 }
 
-// buildFinalResponse creates the final aggregated LLMResponse after streaming completes.
-func buildFinalResponse(text string, toolCalls []toolCall, finishReason string, usage *chatUsage, modelVersion string) *model.LLMResponse {
-	var parts []*genai.Part
-
-	if text != "" {
-		parts = append(parts, &genai.Part{Text: text})
+func parseSSELine(line string) (string, bool) {
+	if !strings.HasPrefix(line, "data: ") {
+		return "", false
 	}
 
-	for _, tc := range toolCalls {
-		parts = append(parts, convertToolCallToPart(tc))
-	}
-
-	if len(parts) == 0 {
-		parts = []*genai.Part{}
-	}
-
-	return &model.LLMResponse{
-		Content: &genai.Content{
-			Parts: parts,
-			Role:  "model",
-		},
-		FinishReason:  mapFinishReason(finishReason),
-		UsageMetadata: convertUsage(usage),
-		ModelVersion:  modelVersion,
-		TurnComplete:  true,
-	}
+	return strings.TrimPrefix(line, "data: "), true
 }

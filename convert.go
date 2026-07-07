@@ -9,35 +9,24 @@ import (
 	"google.golang.org/adk/v2/model"
 )
 
-// convertRequest transforms an ADK LLMRequest into an OpenAI chat request.
-func convertRequest(req *model.LLMRequest, deploymentModel string) chatRequest {
-	cr := chatRequest{
-		Model: deploymentModel,
+func convertMessages(systemInstruction *genai.Content, contents []*genai.Content) []chatMessage {
+	var messages []chatMessage
+
+	if systemInstruction != nil {
+		messages = append(messages, convertSystemInstruction(systemInstruction))
 	}
 
-	if req.Config != nil {
-		cr.Temperature = req.Config.Temperature
-		cr.TopP = req.Config.TopP
-		cr.Stop = req.Config.StopSequences
-
-		if req.Config.MaxOutputTokens > 0 {
-			maxTokens := req.Config.MaxOutputTokens
-			cr.MaxTokens = &maxTokens
+	for _, content := range contents {
+		if content == nil {
+			continue
 		}
 
-		if req.Config.SystemInstruction != nil {
-			cr.Messages = append(cr.Messages, convertSystemInstruction(req.Config.SystemInstruction))
-		}
-
-		cr.Tools = convertTools(req.Config.Tools)
+		messages = append(messages, convertContent(content)...)
 	}
 
-	cr.Messages = append(cr.Messages, convertContents(req.Contents)...)
-
-	return cr
+	return messages
 }
 
-// convertSystemInstruction extracts text from a system instruction Content.
 func convertSystemInstruction(content *genai.Content) chatMessage {
 	var texts []string
 
@@ -53,24 +42,8 @@ func convertSystemInstruction(content *genai.Content) chatMessage {
 	}
 }
 
-// convertContents transforms genai.Content messages into OpenAI chat messages.
-func convertContents(contents []*genai.Content) []chatMessage {
-	var messages []chatMessage
-
-	for _, content := range contents {
-		if content == nil {
-			continue
-		}
-
-		msgs := convertContent(content)
-		messages = append(messages, msgs...)
-	}
-
-	return messages
-}
-
-// convertContent transforms a single genai.Content into one or more OpenAI messages.
-// A single Content may produce multiple messages when it contains function responses.
+// convertContent transforms a single genai.Content into one or more messages.
+// A Content with FunctionResponse parts produces separate tool messages.
 func convertContent(content *genai.Content) []chatMessage {
 	role := mapRole(content.Role)
 
@@ -83,7 +56,6 @@ func convertContent(content *genai.Content) []chatMessage {
 	for _, part := range content.Parts {
 		switch {
 		case part.FunctionResponse != nil:
-			// Function responses become separate tool messages.
 			messages = append(messages, convertFunctionResponse(part.FunctionResponse))
 
 		case part.FunctionCall != nil:
@@ -94,21 +66,19 @@ func convertContent(content *genai.Content) []chatMessage {
 		}
 	}
 
-	// Emit the main message if it has content or tool calls.
 	if len(textParts) > 0 || len(toolCalls) > 0 {
 		msg := chatMessage{
 			Role:      role,
 			Content:   strings.Join(textParts, ""),
 			ToolCalls: toolCalls,
 		}
-		// Prepend main message before any tool responses.
+
 		messages = append([]chatMessage{msg}, messages...)
 	}
 
 	return messages
 }
 
-// convertFunctionCall transforms a genai FunctionCall into an OpenAI tool call.
 func convertFunctionCall(fc *genai.FunctionCall) toolCall {
 	argsJSON, _ := json.Marshal(fc.Args)
 
@@ -122,7 +92,6 @@ func convertFunctionCall(fc *genai.FunctionCall) toolCall {
 	}
 }
 
-// convertFunctionResponse transforms a genai FunctionResponse into an OpenAI tool message.
 func convertFunctionResponse(fr *genai.FunctionResponse) chatMessage {
 	responseJSON, _ := json.Marshal(fr.Response)
 
@@ -134,7 +103,6 @@ func convertFunctionResponse(fr *genai.FunctionResponse) chatMessage {
 	}
 }
 
-// convertTools transforms genai Tools into OpenAI tool definitions.
 func convertTools(tools []*genai.Tool) []toolDef {
 	var defs []toolDef
 
@@ -151,7 +119,6 @@ func convertTools(tools []*genai.Tool) []toolDef {
 	return defs
 }
 
-// convertFunctionDeclaration transforms a genai FunctionDeclaration into an OpenAI tool def.
 func convertFunctionDeclaration(decl *genai.FunctionDeclaration) toolDef {
 	var params any
 
@@ -169,32 +136,15 @@ func convertFunctionDeclaration(decl *genai.FunctionDeclaration) toolDef {
 	}
 }
 
-// convertResponse transforms an OpenAI chat response into an ADK LLMResponse.
-func convertResponse(resp *chatResponse) *model.LLMResponse {
-	if resp.Error != nil {
-		return &model.LLMResponse{
-			ErrorCode:    resp.Error.Code,
-			ErrorMessage: resp.Error.Message,
-		}
-	}
-
-	if len(resp.Choices) == 0 {
-		return &model.LLMResponse{
-			Content: &genai.Content{Parts: []*genai.Part{}, Role: "model"},
-		}
-	}
-
-	choice := resp.Choices[0]
-
+func convertChoiceToResponse(choice chatChoice, usage *chatUsage, modelVersion string) *model.LLMResponse {
 	return &model.LLMResponse{
 		Content:       convertResponseMessage(choice.Message),
 		FinishReason:  mapFinishReason(choice.FinishReason),
-		UsageMetadata: convertUsage(resp.Usage),
-		ModelVersion:  resp.Model,
+		UsageMetadata: convertUsage(usage),
+		ModelVersion:  modelVersion,
 	}
 }
 
-// convertResponseMessage transforms an OpenAI response message into genai Content.
 func convertResponseMessage(msg chatMessage) *genai.Content {
 	var parts []*genai.Part
 
@@ -216,7 +166,6 @@ func convertResponseMessage(msg chatMessage) *genai.Content {
 	}
 }
 
-// convertToolCallToPart transforms an OpenAI tool call into a genai FunctionCall part.
 func convertToolCallToPart(tc toolCall) *genai.Part {
 	var args map[string]any
 
@@ -231,7 +180,6 @@ func convertToolCallToPart(tc toolCall) *genai.Part {
 	}
 }
 
-// convertUsage transforms OpenAI usage into genai usage metadata.
 func convertUsage(usage *chatUsage) *genai.GenerateContentResponseUsageMetadata {
 	if usage == nil {
 		return nil
@@ -243,7 +191,6 @@ func convertUsage(usage *chatUsage) *genai.GenerateContentResponseUsageMetadata 
 	}
 }
 
-// mapRole converts genai role names to OpenAI role names.
 func mapRole(role string) string {
 	switch role {
 	case "model":
@@ -255,7 +202,6 @@ func mapRole(role string) string {
 	}
 }
 
-// mapFinishReason converts OpenAI finish reasons to genai FinishReason.
 func mapFinishReason(reason string) genai.FinishReason {
 	switch reason {
 	case "stop":

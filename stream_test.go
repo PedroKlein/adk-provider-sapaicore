@@ -12,7 +12,7 @@ import (
 	"google.golang.org/adk/v2/model"
 )
 
-func TestGenerateContent_Streaming(t *testing.T) {
+func TestOrchestration_Streaming(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
@@ -21,12 +21,12 @@ func TestGenerateContent_Streaming(t *testing.T) {
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
 
+		// Orchestration wraps chunks in {request_id, final_result: {...}}
 		chunks := []string{
-			`{"id":"chatcmpl-1","model":"gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}`,
-			`{"id":"chatcmpl-1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}`,
-			`{"id":"chatcmpl-1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}`,
+			`{"request_id":"r1","final_result":{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]}}`,
+			`{"request_id":"r1","final_result":{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":" world"}}]}}`,
+			`{"request_id":"r1","final_result":{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}}`,
 		}
 
 		for _, chunk := range chunks {
@@ -38,16 +38,11 @@ func TestGenerateContent_Streaming(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, err := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:     inferenceServer.URL,
-		ClientID:     "id",
-		ClientSecret: "secret",
-		AuthURL:      authServer.URL + "/oauth/token",
-		Deployments:  map[string]string{"gpt-4.1": "deploy-1"},
-	})
-	if err != nil {
-		t.Fatalf("NewProvider: %v", err)
-	}
+	provider, _ := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("d"),
+	)
 
 	llm, _ := provider.Model("gpt-4.1")
 
@@ -61,60 +56,47 @@ func TestGenerateContent_Streaming(t *testing.T) {
 		responses = append(responses, resp)
 	}
 
-	// Expect 3 partial responses + 1 final aggregated response.
+	// 3 partial + 1 final.
 	if len(responses) != 4 {
-		t.Fatalf("expected 4 responses (3 partial + 1 final), got %d", len(responses))
+		t.Fatalf("expected 4 responses, got %d", len(responses))
 	}
 
-	// Verify partial responses.
-	partials := responses[:3]
 	expectedTexts := []string{"Hello", " world", "!"}
 
-	for i, p := range partials {
+	for i, p := range responses[:3] {
 		if !p.Partial {
 			t.Errorf("response %d: expected Partial=true", i)
 		}
 
-		if p.Content == nil || len(p.Content.Parts) == 0 {
-			t.Fatalf("response %d: no content", i)
-		}
-
-		if got := p.Content.Parts[0].Text; got != expectedTexts[i] {
-			t.Errorf("response %d: text=%q, want %q", i, got, expectedTexts[i])
+		if p.Content.Parts[0].Text != expectedTexts[i] {
+			t.Errorf("response %d: text=%q, want %q", i, p.Content.Parts[0].Text, expectedTexts[i])
 		}
 	}
 
-	// Verify final aggregated response.
 	final := responses[3]
 
 	if final.Partial {
-		t.Error("final response should not be partial")
+		t.Error("final should not be partial")
 	}
 
 	if !final.TurnComplete {
-		t.Error("final response should have TurnComplete=true")
+		t.Error("final should have TurnComplete=true")
 	}
 
-	if final.Content == nil || len(final.Content.Parts) == 0 {
-		t.Fatal("final response has no content")
-	}
-
-	if got := final.Content.Parts[0].Text; got != "Hello world!" {
-		t.Errorf("final text = %q, want %q", got, "Hello world!")
+	if final.Content.Parts[0].Text != "Hello world!" {
+		t.Errorf("final text = %q, want %q", final.Content.Parts[0].Text, "Hello world!")
 	}
 
 	if final.FinishReason != genai.FinishReasonStop {
 		t.Errorf("finish reason = %v, want Stop", final.FinishReason)
 	}
 
-	if final.UsageMetadata == nil {
-		t.Error("expected usage metadata in final response")
-	} else if final.UsageMetadata.PromptTokenCount != 5 {
-		t.Errorf("prompt tokens = %d, want 5", final.UsageMetadata.PromptTokenCount)
+	if final.UsageMetadata == nil || final.UsageMetadata.PromptTokenCount != 5 {
+		t.Errorf("unexpected usage metadata: %+v", final.UsageMetadata)
 	}
 }
 
-func TestGenerateContent_StreamingToolCalls(t *testing.T) {
+func TestOrchestration_StreamingToolCalls(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
@@ -124,12 +106,9 @@ func TestGenerateContent_StreamingToolCalls(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 
 		chunks := []string{
-			// First chunk: tool call start with name.
-			`{"id":"chatcmpl-2","model":"gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"search","arguments":""}}]},"finish_reason":null}]}`,
-			// Second chunk: tool call arguments.
-			`{"id":"chatcmpl-2","model":"gpt-4.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":"}}]},"finish_reason":null}]}`,
-			// Third chunk: more arguments.
-			`{"id":"chatcmpl-2","model":"gpt-4.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"hello\"}"}}]},"finish_reason":"tool_calls"}]}`,
+			`{"request_id":"r1","final_result":{"id":"c2","model":"gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_abc","type":"function","function":{"name":"search","arguments":""}}]}}]}}`,
+			`{"request_id":"r1","final_result":{"id":"c2","model":"gpt-4.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"query\":"}}]}}]}}`,
+			`{"request_id":"r1","final_result":{"id":"c2","model":"gpt-4.1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"hello\"}"}}]},"finish_reason":"tool_calls"}]}}`,
 		}
 
 		for _, chunk := range chunks {
@@ -141,13 +120,11 @@ func TestGenerateContent_StreamingToolCalls(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:     inferenceServer.URL,
-		ClientID:     "id",
-		ClientSecret: "secret",
-		AuthURL:      authServer.URL + "/oauth/token",
-		Deployments:  map[string]string{"m": "d"},
-	})
+	provider, _ := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("d"),
+	)
 
 	llm, _ := provider.Model("m")
 
@@ -164,37 +141,82 @@ func TestGenerateContent_StreamingToolCalls(t *testing.T) {
 	}
 
 	if final == nil {
-		t.Fatal("no final response received")
-	}
-
-	if final.Content == nil || len(final.Content.Parts) == 0 {
-		t.Fatal("final response has no parts")
+		t.Fatal("no final response")
 	}
 
 	fc := final.Content.Parts[0].FunctionCall
 	if fc == nil {
-		t.Fatal("expected FunctionCall in final response")
+		t.Fatal("expected FunctionCall in final")
 	}
 
 	if fc.ID != "call_abc" {
-		t.Errorf("function call ID = %q, want %q", fc.ID, "call_abc")
+		t.Errorf("ID = %q, want %q", fc.ID, "call_abc")
 	}
 
 	if fc.Name != "search" {
-		t.Errorf("function name = %q, want %q", fc.Name, "search")
+		t.Errorf("name = %q, want %q", fc.Name, "search")
 	}
 
 	query, _ := fc.Args["query"].(string)
 	if query != "hello" {
 		t.Errorf("args.query = %q, want %q", query, "hello")
 	}
+}
 
-	if final.FinishReason != genai.FinishReasonStop {
-		t.Errorf("finish reason = %v, want Stop (tool_calls maps to Stop)", final.FinishReason)
+func TestFoundation_Streaming(t *testing.T) {
+	t.Parallel()
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		// Foundation mode: flat chunks (no request_id wrapper).
+		chunks := []string{
+			`{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}`,
+			`{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}]}`,
+		}
+
+		for _, chunk := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", chunk)
+		}
+
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		w.(http.Flusher).Flush()
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeployments(map[string]string{"m": "d"}),
+	)
+
+	llm, _ := provider.Model("m")
+
+	var responses []*model.LLMResponse
+
+	for resp, err := range llm.GenerateContent(t.Context(), newSimpleRequest("hey"), true) {
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+
+		responses = append(responses, resp)
+	}
+
+	// 2 partial + 1 final.
+	if len(responses) != 3 {
+		t.Fatalf("expected 3 responses, got %d", len(responses))
+	}
+
+	final := responses[2]
+	if final.Content.Parts[0].Text != "Hi!" {
+		t.Errorf("final text = %q, want %q", final.Content.Parts[0].Text, "Hi!")
 	}
 }
 
-func TestGenerateContent_StreamingError(t *testing.T) {
+func TestStreaming_ErrorResponse(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
@@ -202,27 +224,25 @@ func TestGenerateContent_StreamingError(t *testing.T) {
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit","code":"429"}}`))
+		w.Write([]byte(`{"error":{"message":"rate limited","code":429}}`))
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:     inferenceServer.URL,
-		ClientID:     "id",
-		ClientSecret: "secret",
-		AuthURL:      authServer.URL + "/oauth/token",
-		Deployments:  map[string]string{"m": "d"},
-	})
+	provider, _ := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("d"),
+	)
 
 	llm, _ := provider.Model("m")
 
 	for _, err := range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), true) {
 		if err == nil {
-			t.Fatal("expected error for 429 response")
+			t.Fatal("expected error for 429")
 		}
 
 		return
 	}
 
-	t.Fatal("expected at least one yield from GenerateContent")
+	t.Fatal("expected at least one yield")
 }

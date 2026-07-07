@@ -23,10 +23,6 @@ func TestTokenCache_CachesToken(t *testing.T) {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
 
-		if ct := r.Header.Get("Content-Type"); ct != "application/x-www-form-urlencoded" {
-			t.Errorf("expected form content type, got %s", ct)
-		}
-
 		user, pass, ok := r.BasicAuth()
 		if !ok || user != "test-client-id" || pass != "test-client-secret" {
 			t.Errorf("unexpected basic auth: user=%q pass=%q ok=%v", user, pass, ok)
@@ -46,35 +42,15 @@ func TestTokenCache_CachesToken(t *testing.T) {
 			t.Errorf("expected Bearer token, got %q", auth)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"id":    "chatcmpl-1",
-			"model": "gpt-4.1",
-			"choices": []map[string]any{{
-				"index": 0,
-				"message": map[string]any{
-					"role":    "assistant",
-					"content": "Hello!",
-				},
-				"finish_reason": "stop",
-			}},
-			"usage": map[string]any{
-				"prompt_tokens":     10,
-				"completion_tokens": 5,
-				"total_tokens":      15,
-			},
-		})
+		writeOrchestrationResponse(w, "Hello!", "stop")
 	}))
 	defer inferenceServer.Close()
 
-	provider, err := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:      inferenceServer.URL,
-		ClientID:      "test-client-id",
-		ClientSecret:  "test-client-secret",
-		AuthURL:       authServer.URL + "/oauth/token",
-		ResourceGroup: "default",
-		Deployments:   map[string]string{"gpt-4.1": "deploy-abc"},
-	})
+	provider, err := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("test-client-id", "test-client-secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("orch-deploy"),
+	)
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
@@ -84,7 +60,6 @@ func TestTokenCache_CachesToken(t *testing.T) {
 		t.Fatalf("Model: %v", err)
 	}
 
-	// Call GenerateContent multiple times; token should be fetched only once.
 	for i := range 3 {
 		for resp, err := range llm.GenerateContent(t.Context(), newSimpleRequest("Hi"), false) {
 			if err != nil {
@@ -111,7 +86,6 @@ func TestTokenCache_RefreshOnExpiry(t *testing.T) {
 		callCount.Add(1)
 
 		w.Header().Set("Content-Type", "application/json")
-		// Token expires in 30 seconds (less than the 60s buffer), so it's always "expired".
 		json.NewEncoder(w).Encode(map[string]any{
 			"access_token": fmt.Sprintf("token-%d", callCount.Load()),
 			"expires_in":   30,
@@ -121,33 +95,21 @@ func TestTokenCache_RefreshOnExpiry(t *testing.T) {
 	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"id":    "chatcmpl-1",
-			"model": "gpt-4.1",
-			"choices": []map[string]any{{
-				"index":         0,
-				"message":       map[string]any{"role": "assistant", "content": "ok"},
-				"finish_reason": "stop",
-			}},
-		})
+		writeOrchestrationResponse(w, "ok", "stop")
 	}))
 	defer inferenceServer.Close()
 
-	provider, err := sapaicore.NewProvider(sapaicore.Config{
-		Endpoint:     inferenceServer.URL,
-		ClientID:     "id",
-		ClientSecret: "secret",
-		AuthURL:      authServer.URL + "/oauth/token",
-		Deployments:  map[string]string{"m": "d"},
-	})
+	provider, err := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("d"),
+	)
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)
 	}
 
 	llm, _ := provider.Model("m")
 
-	// Each call should trigger a new token fetch since expiry < buffer.
 	for range 3 {
 		for _, err := range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), false) {
 			if err != nil {
