@@ -28,6 +28,8 @@ type sapModel struct {
 	httpClient    *http.Client
 	mode          mode
 	extraParams   map[string]any
+	timeout       int
+	maxRetries    int
 }
 
 func (m *sapModel) Name() string {
@@ -127,6 +129,9 @@ func (m *sapModel) buildRequestBody(req *model.LLMRequest, stream bool) []byte {
 		maxTokens         int32
 		topP              *float32
 		stop              []string
+		frequencyPenalty  *float32
+		presencePenalty   *float32
+		respFmt           *responseFormat
 	)
 
 	if req.Config != nil {
@@ -136,6 +141,9 @@ func (m *sapModel) buildRequestBody(req *model.LLMRequest, stream bool) []byte {
 		maxTokens = req.Config.MaxOutputTokens
 		topP = req.Config.TopP
 		stop = req.Config.StopSequences
+		frequencyPenalty = req.Config.FrequencyPenalty
+		presencePenalty = req.Config.PresencePenalty
+		respFmt = convertResponseFormat(req.Config.ResponseMIMEType, req.Config.ResponseSchema)
 	}
 
 	messages := convertMessages(systemInstruction, req.Contents)
@@ -144,9 +152,9 @@ func (m *sapModel) buildRequestBody(req *model.LLMRequest, stream bool) []byte {
 
 	switch m.mode {
 	case modeOrchestration:
-		return m.buildOrchestrationBody(modelName, messages, toolDefs, temperature, maxTokens, topP, stop, stream)
+		return m.buildOrchestrationBody(modelName, messages, toolDefs, temperature, maxTokens, topP, stop, frequencyPenalty, presencePenalty, respFmt, stream)
 	default:
-		return m.buildFoundationBody(modelName, messages, toolDefs, temperature, maxTokens, topP, stop, stream)
+		return m.buildFoundationBody(modelName, messages, toolDefs, temperature, maxTokens, topP, stop, frequencyPenalty, presencePenalty, respFmt, stream)
 	}
 }
 
@@ -158,6 +166,9 @@ func (m *sapModel) buildOrchestrationBody(
 	maxTokens int32,
 	topP *float32,
 	stop []string,
+	frequencyPenalty *float32,
+	presencePenalty *float32,
+	respFmt *responseFormat,
 	stream bool,
 ) []byte {
 	params := make(map[string]any)
@@ -178,28 +189,26 @@ func (m *sapModel) buildOrchestrationBody(
 		params["stop"] = stop
 	}
 
-	maps.Copy(params, m.extraParams)
-
-	// Orchestration mode routing:
-	// - template: system messages only (must be non-empty)
-	// - messages_history: all conversation messages (user, assistant, tool)
-	//
-	// The SAP AI Core orchestration V2 API accepts tool role in messages_history.
-	// Template only accepts system role.
-	var template []chatMessage
-
-	var history []chatMessage
-
-	for _, msg := range messages {
-		if msg.Role == "system" {
-			template = append(template, msg)
-		} else {
-			history = append(history, msg)
-		}
+	if frequencyPenalty != nil {
+		params["frequency_penalty"] = *frequencyPenalty
 	}
 
+	if presencePenalty != nil {
+		params["presence_penalty"] = *presencePenalty
+	}
+
+	maps.Copy(params, m.extraParams)
+
+	if stream {
+		params["stream_options"] = map[string]any{"include_usage": true}
+	}
+
+	// All messages go into prompt.template. The orchestration service merges
+	// template with messages_history before sending to the LLM. The JS SDK
+	// (sap-ai-provider, pi-sap-aicore) uses this same approach.
+	template := messages
 	if len(template) == 0 {
-		template = []chatMessage{{Role: "system", Content: "You are a helpful assistant."}}
+		template = []chatMessage{{Role: "system", Content: strPtr("You are a helpful assistant.")}}
 	}
 
 	orchReq := orchestrationRequest{
@@ -207,13 +216,16 @@ func (m *sapModel) buildOrchestrationBody(
 			Modules: moduleConfigs{
 				PromptTemplating: promptTemplatingModule{
 					Prompt: promptConfig{
-						Template: template,
-						Tools:    tools,
+						Template:       template,
+						Tools:          tools,
+						ResponseFormat: respFmt,
 					},
 					Model: modelDef{
-						Name:    modelName,
-						Version: "latest",
-						Params:  params,
+						Name:       modelName,
+						Version:    "latest",
+						Params:     params,
+						Timeout:    m.timeout,
+						MaxRetries: m.maxRetries,
 					},
 				},
 			},
@@ -222,10 +234,6 @@ func (m *sapModel) buildOrchestrationBody(
 
 	if stream {
 		orchReq.Config.Stream = &streamConfig{Enabled: true}
-	}
-
-	if len(history) > 0 {
-		orchReq.MessagesHistory = history
 	}
 
 	body, _ := json.Marshal(orchReq)
@@ -241,20 +249,30 @@ func (m *sapModel) buildFoundationBody(
 	maxTokens int32,
 	topP *float32,
 	stop []string,
+	frequencyPenalty *float32,
+	presencePenalty *float32,
+	respFmt *responseFormat,
 	stream bool,
 ) []byte {
 	fr := foundationRequest{
-		Model:       modelName,
-		Messages:    messages,
-		Tools:       tools,
-		Stream:      stream,
-		Temperature: temperature,
-		TopP:        topP,
-		Stop:        stop,
+		Model:            modelName,
+		Messages:         messages,
+		Tools:            tools,
+		Stream:           stream,
+		Temperature:      temperature,
+		TopP:             topP,
+		Stop:             stop,
+		FrequencyPenalty: frequencyPenalty,
+		PresencePenalty:  presencePenalty,
+		ResponseFormat:   respFmt,
 	}
 
 	if maxTokens > 0 {
 		fr.MaxTokens = &maxTokens
+	}
+
+	if stream {
+		fr.StreamOptions = &streamOptions{IncludeUsage: true}
 	}
 
 	body, _ := json.Marshal(fr)

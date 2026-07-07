@@ -6,10 +6,10 @@ package sapaicore
 
 type chatMessage struct {
 	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
+	Content    *string    `json:"content"`
+	Refusal    string     `json:"refusal,omitempty"`
 	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
 }
 
 type toolCall struct {
@@ -68,14 +68,22 @@ type chatDelta struct {
 // --- Foundation-models mode ---
 
 type foundationRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Tools       []toolDef     `json:"tools,omitempty"`
-	Stream      bool          `json:"stream"`
-	Temperature *float32      `json:"temperature,omitempty"`
-	MaxTokens   *int32        `json:"max_tokens,omitempty"`
-	TopP        *float32      `json:"top_p,omitempty"`
-	Stop        []string      `json:"stop,omitempty"`
+	Model            string          `json:"model"`
+	Messages         []chatMessage   `json:"messages"`
+	Tools            []toolDef       `json:"tools,omitempty"`
+	Stream           bool            `json:"stream"`
+	StreamOptions    *streamOptions  `json:"stream_options,omitempty"`
+	Temperature      *float32        `json:"temperature,omitempty"`
+	MaxTokens        *int32          `json:"max_tokens,omitempty"`
+	TopP             *float32        `json:"top_p,omitempty"`
+	Stop             []string        `json:"stop,omitempty"`
+	FrequencyPenalty *float32        `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float32        `json:"presence_penalty,omitempty"`
+	ResponseFormat   *responseFormat `json:"response_format,omitempty"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type foundationResponse struct {
@@ -96,8 +104,7 @@ type foundationChunk struct {
 // --- Orchestration mode ---
 
 type orchestrationRequest struct {
-	Config          orchestrationConfig `json:"config"`
-	MessagesHistory []chatMessage       `json:"messages_history,omitempty"`
+	Config orchestrationConfig `json:"config"`
 }
 
 type orchestrationConfig struct {
@@ -119,14 +126,29 @@ type promptTemplatingModule struct {
 }
 
 type promptConfig struct {
-	Template []chatMessage `json:"template"`
-	Tools    []toolDef     `json:"tools,omitempty"`
+	Template       []chatMessage   `json:"template"`
+	Tools          []toolDef       `json:"tools,omitempty"`
+	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+}
+
+type responseFormat struct {
+	Type       string      `json:"type"`
+	JSONSchema *jsonSchema `json:"json_schema,omitempty"`
+}
+
+type jsonSchema struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Schema      map[string]any `json:"schema,omitempty"`
+	Strict      *bool          `json:"strict,omitempty"`
 }
 
 type modelDef struct {
-	Name    string         `json:"name"`
-	Version string         `json:"version,omitempty"`
-	Params  map[string]any `json:"params,omitempty"`
+	Name       string         `json:"name"`
+	Version    string         `json:"version,omitempty"`
+	Params     map[string]any `json:"params,omitempty"`
+	Timeout    int            `json:"timeout,omitempty"`
+	MaxRetries int            `json:"max_retries,omitempty"`
 }
 
 type orchestrationResponse struct {

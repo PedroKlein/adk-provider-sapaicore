@@ -1,7 +1,9 @@
 package sapaicore_test
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -245,4 +247,51 @@ func TestStreaming_ErrorResponse(t *testing.T) {
 	}
 
 	t.Fatal("expected at least one yield")
+}
+
+func TestOrchestration_StreamIncludesUsageOption(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, "data: %s\n\n", `{"request_id":"r1","final_result":{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}}`)
+		fmt.Fprint(w, "data: [DONE]\n\n")
+		w.(http.Flusher).Flush()
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("d"),
+	)
+
+	llm, _ := provider.Model("gpt-4.1")
+
+	for range llm.GenerateContent(t.Context(), newSimpleRequest("hi"), true) {
+	}
+
+	// Verify stream_options injected in model params.
+	cfg, _ := capturedBody["config"].(map[string]any)
+	modules, _ := cfg["modules"].(map[string]any)
+	pt, _ := modules["prompt_templating"].(map[string]any)
+	modelCfg, _ := pt["model"].(map[string]any)
+	params, _ := modelCfg["params"].(map[string]any)
+	so, _ := params["stream_options"].(map[string]any)
+
+	if so == nil {
+		t.Fatal("expected stream_options in params, got nil")
+	}
+
+	if so["include_usage"] != true {
+		t.Errorf("stream_options.include_usage = %v, want true", so["include_usage"])
+	}
 }

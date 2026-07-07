@@ -50,6 +50,8 @@ type providerConfig struct {
 	deploymentID  string
 	deployments   map[string]string
 	autoDiscover  bool
+	timeout       int
+	maxRetries    int
 }
 
 // Option configures a [Provider]. Pass options to [NewProvider].
@@ -118,6 +120,22 @@ func WithDeploymentID(id string) Option {
 func WithDeployments(deployments map[string]string) Option {
 	return func(c *providerConfig) {
 		c.deployments = deployments
+	}
+}
+
+// WithTimeout sets the server-side LLM request timeout in seconds (1–1200).
+// Zero means use the server default (600s).
+func WithTimeout(seconds int) Option {
+	return func(c *providerConfig) {
+		c.timeout = seconds
+	}
+}
+
+// WithMaxRetries sets the server-side retry count for LLM requests (0–5).
+// Zero means use the server default (2 retries).
+func WithMaxRetries(n int) Option {
+	return func(c *providerConfig) {
+		c.maxRetries = n
 	}
 }
 
@@ -238,6 +256,8 @@ func (p *Provider) Model(name string, opts ...ModelOption) (model.LLM, error) {
 		httpClient:    p.cfg.httpClient,
 		mode:          p.mode,
 		extraParams:   mc.extraParams,
+		timeout:       p.cfg.timeout,
+		maxRetries:    p.cfg.maxRetries,
 	}, nil
 }
 

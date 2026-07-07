@@ -84,15 +84,8 @@ func main() {
 	testExtendedThinking(ctx, provider)
 
 	// --- Function response round-trip ---
-	// NOTE: SAP AI Core orchestration has a known limitation where tool call
-	// results cannot be passed back in a single multi-turn request
-	// (see https://github.com/SAP/ai-sdk-js/issues/1479).
-	// In practice this isn't an issue because the ADK runner handles tool loops
-	// automatically — each tool call is a separate GenerateContent request.
 	fmt.Println("\n\n=== Function Response Round-trip ===")
-	fmt.Println("  SKIPPED: SAP AI Core orchestration does not support tool role in messages_history.")
-	fmt.Println("  This is a known API limitation (github.com/SAP/ai-sdk-js/issues/1479).")
-	fmt.Println("  ADK agents work because tool loops use separate requests per turn.")
+	testFunctionResponseRoundTrip(ctx, provider)
 
 	// --- Error handling ---
 	fmt.Println("\n\n=== Error Handling ===")
@@ -596,6 +589,70 @@ func testTemperatureZero(ctx context.Context, provider *sapaicore.Provider) {
 		}
 
 		break
+	}
+}
+
+func testFunctionResponseRoundTrip(ctx context.Context, provider *sapaicore.Provider) {
+	fmt.Printf("\n  --- Function Response Round-trip (gpt-4.1-mini) ---\n")
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		fmt.Printf("  ERROR creating model: %v\n", err)
+		return
+	}
+
+	// Full tool-call round-trip: user → assistant(tool_call) → tool_result → model responds.
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "What is the weather in Berlin?"}}, Role: "user"},
+			{Parts: []*genai.Part{{FunctionCall: &genai.FunctionCall{
+				ID:   "call_123",
+				Name: "get_weather",
+				Args: map[string]any{"city": "Berlin"},
+			}}}, Role: "model"},
+			{Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{
+				ID:       "call_123",
+				Name:     "get_weather",
+				Response: map[string]any{"temperature": "22°C", "condition": "sunny"},
+			}}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			SystemInstruction: &genai.Content{
+				Parts: []*genai.Part{{Text: "You are a weather assistant. Answer concisely."}},
+			},
+			Tools: []*genai.Tool{{
+				FunctionDeclarations: []*genai.FunctionDeclaration{{
+					Name:        "get_weather",
+					Description: "Get current weather for a city",
+					Parameters: &genai.Schema{
+						Type: "OBJECT",
+						Properties: map[string]*genai.Schema{
+							"city": {Type: "STRING", Description: "City name"},
+						},
+						Required: []string{"city"},
+					},
+				}},
+			}},
+		},
+	}
+
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			fmt.Printf("  ERROR: %v\n", err)
+			return
+		}
+
+		if resp.TurnComplete && resp.Content != nil && len(resp.Content.Parts) > 0 {
+			text := resp.Content.Parts[0].Text
+			fmt.Printf("  Response: %s\n", text)
+
+			lower := strings.ToLower(text)
+			if strings.Contains(lower, "22") || strings.Contains(lower, "sunny") || strings.Contains(lower, "berlin") {
+				fmt.Println("  ✅ Model used tool result in response")
+			} else {
+				fmt.Println("  ⚠️  Response doesn't clearly reference tool result")
+			}
+		}
 	}
 }
 

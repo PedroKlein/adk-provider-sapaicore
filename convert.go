@@ -9,6 +9,8 @@ import (
 	"google.golang.org/adk/v2/model"
 )
 
+func strPtr(s string) *string { return &s }
+
 func convertMessages(systemInstruction *genai.Content, contents []*genai.Content) []chatMessage {
 	var messages []chatMessage
 
@@ -38,7 +40,7 @@ func convertSystemInstruction(content *genai.Content) chatMessage {
 
 	return chatMessage{
 		Role:    "system",
-		Content: strings.Join(texts, "\n"),
+		Content: strPtr(strings.Join(texts, "\n")),
 	}
 }
 
@@ -69,7 +71,7 @@ func convertContent(content *genai.Content) []chatMessage {
 	if len(textParts) > 0 || len(toolCalls) > 0 {
 		msg := chatMessage{
 			Role:      role,
-			Content:   strings.Join(textParts, ""),
+			Content:   strPtr(strings.Join(textParts, "")),
 			ToolCalls: toolCalls,
 		}
 
@@ -95,16 +97,10 @@ func convertFunctionCall(fc *genai.FunctionCall) toolCall {
 func convertFunctionResponse(fr *genai.FunctionResponse) chatMessage {
 	responseJSON, _ := json.Marshal(fr.Response)
 
-	// SAP AI Core orchestration does not support 'tool' role in messages_history
-	// or template (see https://github.com/SAP/ai-sdk-js/issues/1479).
-	// Tool responses are sent as 'user' messages with the tool_call_id.
-	// The model correctly interprets this as a tool result due to the
-	// preceding assistant message with matching tool_calls.
 	return chatMessage{
-		Role:       "user",
-		Content:    string(responseJSON),
+		Role:       "tool",
+		Content:    strPtr(string(responseJSON)),
 		ToolCallID: fr.ID,
-		Name:       fr.Name,
 	}
 }
 
@@ -179,20 +175,50 @@ func convertSchema(s *genai.Schema) map[string]any {
 	return result
 }
 
+// convertResponseFormat maps genai's ResponseMIMEType/ResponseSchema to the
+// OpenAI-compatible response_format field.
+func convertResponseFormat(mimeType string, schema *genai.Schema) *responseFormat {
+	if mimeType != "application/json" {
+		return nil
+	}
+
+	if schema == nil {
+		return &responseFormat{Type: "json_object"}
+	}
+
+	strict := true
+
+	return &responseFormat{
+		Type: "json_schema",
+		JSONSchema: &jsonSchema{
+			Name:   "response",
+			Schema: convertSchema(schema),
+			Strict: &strict,
+		},
+	}
+}
+
 func convertChoiceToResponse(choice chatChoice, usage *chatUsage, modelVersion string) *model.LLMResponse {
-	return &model.LLMResponse{
+	resp := &model.LLMResponse{
 		Content:       convertResponseMessage(choice.Message),
 		FinishReason:  mapFinishReason(choice.FinishReason),
 		UsageMetadata: convertUsage(usage),
 		ModelVersion:  modelVersion,
 	}
+
+	if choice.Message.Refusal != "" {
+		resp.ErrorCode = "refusal"
+		resp.ErrorMessage = choice.Message.Refusal
+	}
+
+	return resp
 }
 
 func convertResponseMessage(msg chatMessage) *genai.Content {
 	var parts []*genai.Part
 
-	if msg.Content != "" {
-		parts = append(parts, &genai.Part{Text: msg.Content})
+	if msg.Content != nil && *msg.Content != "" {
+		parts = append(parts, &genai.Part{Text: *msg.Content})
 	}
 
 	for _, tc := range msg.ToolCalls {
