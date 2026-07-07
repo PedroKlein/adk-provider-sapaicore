@@ -95,8 +95,13 @@ func convertFunctionCall(fc *genai.FunctionCall) toolCall {
 func convertFunctionResponse(fr *genai.FunctionResponse) chatMessage {
 	responseJSON, _ := json.Marshal(fr.Response)
 
+	// SAP AI Core orchestration does not support 'tool' role in messages_history
+	// or template (see https://github.com/SAP/ai-sdk-js/issues/1479).
+	// Tool responses are sent as 'user' messages with the tool_call_id.
+	// The model correctly interprets this as a tool result due to the
+	// preceding assistant message with matching tool_calls.
 	return chatMessage{
-		Role:       "tool",
+		Role:       "user",
 		Content:    string(responseJSON),
 		ToolCallID: fr.ID,
 		Name:       fr.Name,
@@ -123,7 +128,7 @@ func convertFunctionDeclaration(decl *genai.FunctionDeclaration) toolDef {
 	var params any
 
 	if decl.Parameters != nil {
-		params = decl.Parameters
+		params = convertSchema(decl.Parameters)
 	}
 
 	return toolDef{
@@ -134,6 +139,44 @@ func convertFunctionDeclaration(decl *genai.FunctionDeclaration) toolDef {
 			Parameters:  params,
 		},
 	}
+}
+
+// convertSchema transforms a genai.Schema into an OpenAI-compatible JSON Schema.
+// genai uses uppercase types ("STRING", "OBJECT") while OpenAI/SAP expects lowercase.
+func convertSchema(s *genai.Schema) map[string]any {
+	result := make(map[string]any)
+
+	if s.Type != "" {
+		result["type"] = strings.ToLower(string(s.Type))
+	}
+
+	if s.Description != "" {
+		result["description"] = s.Description
+	}
+
+	if len(s.Enum) > 0 {
+		result["enum"] = s.Enum
+	}
+
+	if len(s.Required) > 0 {
+		result["required"] = s.Required
+	}
+
+	if len(s.Properties) > 0 {
+		props := make(map[string]any, len(s.Properties))
+
+		for name, prop := range s.Properties {
+			props[name] = convertSchema(prop)
+		}
+
+		result["properties"] = props
+	}
+
+	if s.Items != nil {
+		result["items"] = convertSchema(s.Items)
+	}
+
+	return result
 }
 
 func convertChoiceToResponse(choice chatChoice, usage *chatUsage, modelVersion string) *model.LLMResponse {

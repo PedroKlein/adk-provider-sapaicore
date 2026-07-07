@@ -141,6 +141,7 @@ sapaicore.ErrMissingConfig      // required option not provided
 sapaicore.ErrDeploymentNotFound // model name not in Deployments map (foundation mode only)
 sapaicore.ErrTokenRefresh       // OAuth2 token fetch failed
 sapaicore.ErrInference          // inference request failed
+sapaicore.ErrDiscovery          // orchestration deployment auto-discovery failed
 ```
 
 ## Credentials
@@ -153,6 +154,8 @@ From your SAP AI Core service key (BTP cockpit):
 | `WithAuth` clientID | `uaa.clientid` |
 | `WithAuth` clientSecret | `uaa.clientsecret` |
 | `WithAuth` authURL | `uaa.url` + `/oauth/token` |
+
+With `WithOrchestration()`, that's all you need — no deployment ID required.
 
 ## How it works
 

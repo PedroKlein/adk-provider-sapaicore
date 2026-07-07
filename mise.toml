@@ -1,0 +1,46 @@
+[env]
+_.file = ".env"
+
+[tools]
+go = "1.25"
+
+[tasks.build]
+description = "Build all packages"
+run = "go build ./..."
+
+[tasks.test]
+description = "Run tests with race detector"
+run = "go test -race ./..."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run ./..."
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.check]
+description = "Run all checks (build + vet + lint + test)"
+depends = ["build", "vet", "lint", "test"]
+
+[tasks.smoke]
+description = "Run smoke test against real SAP AI Core"
+run = "go run ./cmd/smoke/"
+
+[tasks."smoke:large"]
+description = "Run smoke test with >200K token 1M context verification"
+env = { SMOKE_LARGE_CONTEXT = "1" }
+run = "go run ./cmd/smoke/"
+
+[tasks.tidy]
+description = "Run go mod tidy"
+run = "go mod tidy"
+
+[tasks.coverage]
+description = "Run tests with coverage report"
+run = """
+go test -race -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out -o coverage.html
+echo "Coverage report: coverage.html"
+"""

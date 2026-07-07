@@ -53,6 +53,15 @@ func TestNewProvider_ValidatesConfig(t *testing.T) {
 				sapaicore.WithDeployments(map[string]string{"m": "d"}),
 			},
 		},
+		{
+			name: "orchestration and deployment ID",
+			opts: []sapaicore.Option{
+				sapaicore.WithEndpoint("https://api.example.com"),
+				sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
+				sapaicore.WithOrchestration(),
+				sapaicore.WithDeploymentID("d"),
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -113,6 +122,90 @@ func TestProvider_Model_AnyName_OrchestrationMode(t *testing.T) {
 
 	if llm.Name() != "anthropic--claude-4.5-sonnet" {
 		t.Errorf("name = %q, want %q", llm.Name(), "anthropic--claude-4.5-sonnet")
+	}
+}
+
+func TestProvider_WithOrchestration_AutoDiscovers(t *testing.T) {
+	t.Parallel()
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	// Mock the deployments API.
+	deploymentsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/lm/deployments" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+
+			return
+		}
+
+		if scenario := r.URL.Query().Get("scenarioId"); scenario != "orchestration" {
+			t.Errorf("scenarioId = %q, want %q", scenario, "orchestration")
+		}
+
+		if status := r.URL.Query().Get("status"); status != "RUNNING" {
+			t.Errorf("status = %q, want %q", status, "RUNNING")
+		}
+
+		if rg := r.Header.Get("AI-Resource-Group"); rg != "default" {
+			t.Errorf("resource group = %q, want %q", rg, "default")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"resources": []map[string]any{
+				{"id": "discovered-deploy-id", "scenarioId": "orchestration", "status": "RUNNING"},
+			},
+		})
+	}))
+	defer deploymentsServer.Close()
+
+	provider, err := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(deploymentsServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithOrchestration(),
+	)
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+
+	// Should be able to create models (deployment was discovered).
+	llm, err := provider.Model("gpt-4.1")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	if llm.Name() != "gpt-4.1" {
+		t.Errorf("name = %q, want %q", llm.Name(), "gpt-4.1")
+	}
+}
+
+func TestProvider_WithOrchestration_NoDeploymentFound(t *testing.T) {
+	t.Parallel()
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	deploymentsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"resources": []map[string]any{},
+		})
+	}))
+	defer deploymentsServer.Close()
+
+	_, err := sapaicore.NewProvider(
+		sapaicore.WithEndpoint(deploymentsServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithOrchestration(),
+	)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !errors.Is(err, sapaicore.ErrDiscovery) {
+		t.Errorf("expected ErrDiscovery, got: %v", err)
 	}
 }
 
@@ -213,13 +306,25 @@ func TestOrchestration_NonStreaming(t *testing.T) {
 	prompt, _ := pt["prompt"].(map[string]any)
 	template, _ := prompt["template"].([]any)
 
-	if len(template) < 2 {
-		t.Fatalf("expected >= 2 template messages, got %d", len(template))
+	// Only system message goes in template.
+	if len(template) != 1 {
+		t.Fatalf("expected 1 template message (system), got %d", len(template))
 	}
 
 	sysMsg, _ := template[0].(map[string]any)
 	if sysMsg["role"] != "system" {
 		t.Errorf("first message role = %v, want system", sysMsg["role"])
+	}
+
+	// User messages go in messages_history.
+	history, _ := capturedBody["messages_history"].([]any)
+	if len(history) != 1 {
+		t.Fatalf("expected 1 message in history, got %d", len(history))
+	}
+
+	userMsg, _ := history[0].(map[string]any)
+	if userMsg["role"] != "user" {
+		t.Errorf("history[0] role = %v, want user", userMsg["role"])
 	}
 }
 

@@ -180,12 +180,34 @@ func (m *sapModel) buildOrchestrationBody(
 
 	maps.Copy(params, m.extraParams)
 
+	// Orchestration mode routing:
+	// - template: system messages only (must be non-empty)
+	// - messages_history: all conversation messages (user, assistant, tool)
+	//
+	// The SAP AI Core orchestration V2 API accepts tool role in messages_history.
+	// Template only accepts system role.
+	var template []chatMessage
+
+	var history []chatMessage
+
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			template = append(template, msg)
+		} else {
+			history = append(history, msg)
+		}
+	}
+
+	if len(template) == 0 {
+		template = []chatMessage{{Role: "system", Content: "You are a helpful assistant."}}
+	}
+
 	orchReq := orchestrationRequest{
 		Config: orchestrationConfig{
 			Modules: moduleConfigs{
 				PromptTemplating: promptTemplatingModule{
 					Prompt: promptConfig{
-						Template: messages,
+						Template: template,
 						Tools:    tools,
 					},
 					Model: modelDef{
@@ -200,6 +222,10 @@ func (m *sapModel) buildOrchestrationBody(
 
 	if stream {
 		orchReq.Config.Stream = &streamConfig{Enabled: true}
+	}
+
+	if len(history) > 0 {
+		orchReq.MessagesHistory = history
 	}
 
 	body, _ := json.Marshal(orchReq)

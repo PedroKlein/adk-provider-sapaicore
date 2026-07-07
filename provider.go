@@ -1,11 +1,18 @@
-// Package sapaicore implements the ADK Go v2 model.LLM interface for SAP AI Core.
+// Package sapaicore implements the ADK Go v2 [model.LLM] interface for SAP AI Core.
 //
 // Two modes are supported:
-//   - Orchestration (default): single deployment handles all models via harmonized API
-//   - Foundation-models: per-model deployment IDs with direct OpenAI-compatible API
+//   - Orchestration (default): a single deployment handles all models via SAP AI Core's
+//     harmonized API. Use [WithDeploymentID] to enable this mode.
+//   - Foundation-models: per-model deployment IDs with a direct OpenAI-compatible API.
+//     Use [WithDeployments] to enable this mode.
+//
+// Create a [Provider] with [NewProvider], then call [Provider.Model] to obtain an
+// [model.LLM] you can pass to any ADK agent.
 package sapaicore
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +26,7 @@ var (
 	ErrDeploymentNotFound = errors.New("sapaicore: deployment not found for model")
 	ErrTokenRefresh       = errors.New("sapaicore: token refresh failed")
 	ErrInference          = errors.New("sapaicore: inference request failed")
+	ErrDiscovery          = errors.New("sapaicore: orchestration deployment discovery failed")
 )
 
 const defaultResourceGroup = "default"
@@ -41,9 +49,10 @@ type providerConfig struct {
 	headers       http.Header
 	deploymentID  string
 	deployments   map[string]string
+	autoDiscover  bool
 }
 
-// Option configures a Provider.
+// Option configures a [Provider]. Pass options to [NewProvider].
 type Option func(*providerConfig)
 
 // WithEndpoint sets the SAP AI Core API base URL.
@@ -86,8 +95,19 @@ func WithHeaders(headers http.Header) Option {
 	}
 }
 
-// WithDeploymentID enables orchestration mode using a single deployment
-// that routes to all models. The model name is passed in the request body.
+// WithOrchestration enables orchestration mode by automatically discovering
+// the orchestration deployment. It queries the SAP AI Core deployments API
+// at provider creation time to find the running orchestration deployment.
+//
+// This is the simplest way to use orchestration mode — no deployment ID needed.
+func WithOrchestration() Option {
+	return func(c *providerConfig) {
+		c.autoDiscover = true
+	}
+}
+
+// WithDeploymentID enables orchestration mode using a specific deployment ID.
+// Use this if you know the deployment ID, or use [WithOrchestration] for auto-discovery.
 func WithDeploymentID(id string) Option {
 	return func(c *providerConfig) {
 		c.deploymentID = id
@@ -101,14 +121,19 @@ func WithDeployments(deployments map[string]string) Option {
 	}
 }
 
-// Provider creates model.LLM instances for SAP AI Core.
+// Provider creates [model.LLM] instances backed by SAP AI Core deployments.
+// Use [NewProvider] to construct a valid Provider.
 type Provider struct {
 	cfg  providerConfig
 	mode mode
 	auth *tokenCache
 }
 
-// NewProvider validates options and returns a Provider.
+// NewProvider validates the given options and returns a ready-to-use [Provider].
+// It returns [ErrMissingConfig] if required options are absent or conflicting.
+//
+// When [WithOrchestration] is used, NewProvider makes an HTTP call to discover
+// the orchestration deployment ID. This requires network access at creation time.
 func NewProvider(opts ...Option) (*Provider, error) {
 	cfg := providerConfig{
 		resourceGroup: defaultResourceGroup,
@@ -126,16 +151,26 @@ func NewProvider(opts ...Option) (*Provider, error) {
 		cfg.httpClient = &http.Client{}
 	}
 
-	m := modeOrchestration
-	if len(cfg.deployments) > 0 {
-		m = modeFoundation
-	}
-
 	auth := &tokenCache{
 		clientID:     cfg.clientID,
 		clientSecret: cfg.clientSecret,
 		authURL:      cfg.authURL,
 		httpClient:   cfg.httpClient,
+	}
+
+	// Auto-discover orchestration deployment if requested.
+	if cfg.autoDiscover {
+		deploymentID, err := discoverOrchestrationDeployment(auth, &cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		cfg.deploymentID = deploymentID
+	}
+
+	m := modeOrchestration
+	if len(cfg.deployments) > 0 {
+		m = modeFoundation
 	}
 
 	return &Provider{
@@ -145,28 +180,32 @@ func NewProvider(opts ...Option) (*Provider, error) {
 	}, nil
 }
 
-// ModelOption configures a specific model instance.
+// ModelOption configures a specific model instance returned by [Provider.Model].
 type ModelOption func(*modelConfig)
 
 type modelConfig struct {
 	extraParams map[string]any
 }
 
-// WithModelParams adds extra parameters passed to the model.
+// WithModelParams adds extra parameters forwarded directly to the model.
 // In orchestration mode these go into model.params (e.g. thinking, reasoning_effort, anthropic_beta).
-// In foundation-models mode these are merged into the request body.
+// In foundation-models mode these are merged into the top-level request body.
+//
+// Use this for provider-specific features that ADK's [genai.GenerateContentConfig]
+// does not expose (extended thinking, 1M context windows, reasoning effort, etc.).
 func WithModelParams(params map[string]any) ModelOption {
 	return func(c *modelConfig) {
 		c.extraParams = params
 	}
 }
 
-// Model returns a model.LLM for the given model name.
+// Model returns a [model.LLM] for the given model name.
 //
-// In orchestration mode, name is the SAP AI Core model identifier
-// (e.g. "gpt-4.1", "anthropic--claude-4.5-sonnet").
+// In orchestration mode, name is any SAP AI Core model identifier
+// (e.g. "gpt-4.1", "anthropic--claude-4.5-sonnet", "gemini-2.5-flash").
 //
-// In foundation-models mode, name must exist in the Deployments map.
+// In foundation-models mode, name must exist in the map provided to [WithDeployments].
+// Returns [ErrDeploymentNotFound] if the name is not registered.
 func (p *Provider) Model(name string, opts ...ModelOption) (model.LLM, error) {
 	mc := modelConfig{}
 
@@ -216,14 +255,82 @@ func validateProviderConfig(cfg *providerConfig) error {
 
 	hasDeploymentID := cfg.deploymentID != ""
 	hasDeployments := len(cfg.deployments) > 0
+	hasAutoDiscover := cfg.autoDiscover
 
-	if !hasDeploymentID && !hasDeployments {
-		return fmt.Errorf("either WithDeploymentID or WithDeployments required: %w", ErrMissingConfig)
+	modes := 0
+	if hasDeploymentID {
+		modes++
 	}
 
-	if hasDeploymentID && hasDeployments {
-		return fmt.Errorf("WithDeploymentID and WithDeployments are mutually exclusive: %w", ErrMissingConfig)
+	if hasDeployments {
+		modes++
+	}
+
+	if hasAutoDiscover {
+		modes++
+	}
+
+	if modes == 0 {
+		return fmt.Errorf("one of WithOrchestration, WithDeploymentID, or WithDeployments required: %w", ErrMissingConfig)
+	}
+
+	if modes > 1 {
+		return fmt.Errorf("WithOrchestration, WithDeploymentID, and WithDeployments are mutually exclusive: %w", ErrMissingConfig)
 	}
 
 	return nil
+}
+
+// discoverOrchestrationDeployment queries the SAP AI Core API to find
+// the running orchestration deployment.
+func discoverOrchestrationDeployment(auth *tokenCache, cfg *providerConfig) (string, error) {
+	ctx := context.Background()
+
+	token, err := auth.getToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("getting token for discovery: %w", ErrDiscovery)
+	}
+
+	url := cfg.endpoint + "/v2/lm/deployments?scenarioId=orchestration&status=RUNNING"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return "", fmt.Errorf("creating discovery request: %w", ErrDiscovery)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("AI-Resource-Group", cfg.resourceGroup)
+
+	resp, err := cfg.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("executing discovery request: %w", ErrDiscovery)
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("discovery API returned status %d: %w", resp.StatusCode, ErrDiscovery)
+	}
+
+	var result deploymentsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("decoding discovery response: %w", ErrDiscovery)
+	}
+
+	if len(result.Resources) == 0 {
+		return "", fmt.Errorf("no running orchestration deployment found: %w", ErrDiscovery)
+	}
+
+	return result.Resources[0].ID, nil
+}
+
+// deploymentsResponse is the SAP AI Core deployments list response.
+type deploymentsResponse struct {
+	Resources []deploymentResource `json:"resources"`
+}
+
+type deploymentResource struct {
+	ID         string `json:"id"`
+	ScenarioID string `json:"scenarioId"`
+	Status     string `json:"status"`
 }
