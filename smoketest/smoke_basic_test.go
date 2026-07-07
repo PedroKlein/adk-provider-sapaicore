@@ -1,0 +1,210 @@
+//go:build smoke
+
+package smoketest_test
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"google.golang.org/genai"
+
+	sapaicore "github.com/PedroKlein/go-adk-sap-ai-core"
+	"google.golang.org/adk/v2/model"
+)
+
+func TestSmoke_NonStreaming(t *testing.T) {
+	provider := newProvider(t)
+
+	for _, modelName := range testModels {
+		t.Run(modelName, func(t *testing.T) {
+			ctx := withTimeout(t, 30*time.Second)
+
+			llm, err := provider.Model(modelName)
+			if err != nil {
+				t.Fatalf("Model: %v", err)
+			}
+
+			req := &model.LLMRequest{
+				Contents: []*genai.Content{
+					{Parts: []*genai.Part{{Text: "Reply with exactly: hello"}}, Role: "user"},
+				},
+				Config: &genai.GenerateContentConfig{
+					SystemInstruction: &genai.Content{
+						Parts: []*genai.Part{{Text: "You are a concise assistant. Reply in one word."}},
+					},
+				},
+			}
+
+			resp := generateOne(t, ctx, llm, req)
+
+			text := requireText(t, resp)
+			if text == "" {
+				t.Error("empty response text")
+			}
+
+			if resp.UsageMetadata == nil {
+				t.Error("missing usage metadata")
+			}
+
+			t.Logf("response=%q model=%s tokens=%+v", text, resp.ModelVersion, resp.UsageMetadata)
+		})
+	}
+}
+
+func TestSmoke_Streaming(t *testing.T) {
+	provider := newProvider(t)
+
+	for _, modelName := range testModels {
+		t.Run(modelName, func(t *testing.T) {
+			ctx := withTimeout(t, 30*time.Second)
+
+			llm, err := provider.Model(modelName)
+			if err != nil {
+				t.Fatalf("Model: %v", err)
+			}
+
+			req := simpleReq("Count from 1 to 5, separating each number with a comma.")
+
+			partials, final := generateStream(t, ctx, llm, req)
+
+			if len(partials) == 0 {
+				t.Error("expected at least one partial chunk")
+			}
+
+			text := requireText(t, final)
+			if !strings.Contains(text, "3") && !strings.Contains(strings.ToLower(text), "three") {
+				t.Errorf("expected text to contain '3' or 'three', got: %q", text)
+			}
+
+			if !final.TurnComplete {
+				t.Error("final response not marked TurnComplete")
+			}
+
+			t.Logf("chunks=%d final=%q", len(partials), text)
+		})
+	}
+}
+
+func TestSmoke_ModelParams(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 30*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini",
+		sapaicore.WithModelParams(map[string]any{"max_tokens": 50}),
+	)
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	resp := generateOne(t, ctx, llm, simpleReq("Write a very long essay about the history of computing."))
+
+	text := requireText(t, resp)
+
+	// With max_tokens=50, response should be truncated.
+	words := strings.Fields(text)
+	if len(words) > 100 {
+		t.Errorf("expected short response (max_tokens=50), got %d words", len(words))
+	}
+
+	t.Logf("words=%d text=%q", len(words), text)
+}
+
+func TestSmoke_MultiTurn(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 30*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "My name is Pedro. Remember it."}}, Role: "user"},
+			{Parts: []*genai.Part{{Text: "Got it! Your name is Pedro."}}, Role: "model"},
+			{Parts: []*genai.Part{{Text: "What is my name?"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			SystemInstruction: &genai.Content{
+				Parts: []*genai.Part{{Text: "Be concise."}},
+			},
+		},
+	}
+
+	resp := generateOne(t, ctx, llm, req)
+
+	text := requireText(t, resp)
+	if !strings.Contains(strings.ToLower(text), "pedro") {
+		t.Errorf("multi-turn context lost: response=%q", text)
+	}
+
+	t.Logf("response=%q", text)
+}
+
+func TestSmoke_StopSequences(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 30*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	temp := float32(0)
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Count from 1 to 20, each number on a new line."}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			StopSequences: []string{"5"},
+			Temperature:   &temp,
+		},
+	}
+
+	resp := generateOne(t, ctx, llm, req)
+
+	text := requireText(t, resp)
+	if strings.Contains(text, "6") {
+		t.Errorf("stop sequence not honored, text contains '6': %q", text)
+	}
+
+	t.Logf("response=%q", text)
+}
+
+func TestSmoke_ResponseFormat_JSON(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 30*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Give me a person with name and age."}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			ResponseMIMEType: "application/json",
+			ResponseSchema: &genai.Schema{
+				Type: "OBJECT",
+				Properties: map[string]*genai.Schema{
+					"name": {Type: "STRING"},
+					"age":  {Type: "INTEGER"},
+				},
+				Required: []string{"name", "age"},
+			},
+		},
+	}
+
+	resp := generateOne(t, ctx, llm, req)
+
+	text := requireText(t, resp)
+	if !strings.HasPrefix(strings.TrimSpace(text), "{") {
+		t.Errorf("expected JSON object, got: %q", text)
+	}
+
+	t.Logf("response=%q", text)
+}
