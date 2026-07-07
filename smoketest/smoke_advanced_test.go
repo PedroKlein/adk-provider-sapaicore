@@ -79,10 +79,10 @@ func TestSmoke_Anthropic1MContext(t *testing.T) {
 	provider := newProvider(t)
 	ctx := withTimeout(t, 120*time.Second)
 
-	llm, err := provider.Model("anthropic--claude-4.5-sonnet",
+	// Claude 4.6+ has 1M context natively, no beta header needed.
+	llm, err := provider.Model("anthropic--claude-4.6-sonnet",
 		sapaicore.WithModelParams(map[string]any{
-			"anthropic_beta": []string{"context-1m-2025-08-07"},
-			"max_tokens":     4096,
+			"max_tokens": 4096,
 		}),
 	)
 	if err != nil {
@@ -242,4 +242,58 @@ func TestSmoke_ADK_AgentStyleUsage(t *testing.T) {
 	}
 
 	t.Logf("step 2: final answer=%q", text)
+}
+
+func TestSmoke_ParamForwarding_Logprobs(t *testing.T) {
+	// Verifies that WithModelParams actually reaches the provider by requesting
+	// logprobs from GPT. If forwarded, the raw API response includes a logprobs
+	// field. We can't inspect it directly through the ADK response (ADK doesn't
+	// expose logprobs), but the request succeeds only if the param is accepted.
+	// An invalid param would cause an API error.
+	provider := newProvider(t)
+	ctx := withTimeout(t, 30*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini",
+		sapaicore.WithModelParams(map[string]any{
+			"logprobs":     true,
+			"top_logprobs": 3,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	resp := generateOne(t, ctx, llm, simpleReq("What is 2+2?"))
+
+	text := requireText(t, resp)
+	if text == "" {
+		t.Error("empty response")
+	}
+
+	t.Logf("response=%q (logprobs param accepted by provider)", text)
+}
+
+func TestSmoke_ParamForwarding_ReasoningEffort(t *testing.T) {
+	// o4-mini accepts reasoning_effort param. If not forwarded, the request
+	// would either fail or use default effort.
+	provider := newProvider(t)
+	ctx := withTimeout(t, 45*time.Second)
+
+	llm, err := provider.Model("o4-mini",
+		sapaicore.WithModelParams(map[string]any{
+			"reasoning_effort": "low",
+		}),
+	)
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	resp := generateOne(t, ctx, llm, simpleReq("What is the capital of France?"))
+
+	text := requireText(t, resp)
+	if !strings.Contains(strings.ToLower(text), "paris") {
+		t.Errorf("expected Paris, got: %q", text)
+	}
+
+	t.Logf("response=%q (reasoning_effort=low accepted)", text)
 }

@@ -36,7 +36,7 @@ func main() {
 			os.Getenv("AI_CORE_CLIENT_SECRET"),
 			os.Getenv("AI_CORE_AUTH_URL"),
 		),
-		sapaicore.WithDeploymentID(os.Getenv("AI_CORE_DEPLOYMENT_ID")),
+		sapaicore.WithOrchestration(), // auto-discovers the orchestration deployment
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -56,6 +56,8 @@ func main() {
 	_ = runner.New(runner.Config{AppName: "my-app", Agent: agent})
 }
 ```
+
+If you already know the deployment ID, use `WithDeploymentID(id)` instead to skip the discovery call.
 
 You can use any model available on SAP AI Core by passing its name directly:
 
@@ -96,11 +98,10 @@ llm, _ := provider.Model("anthropic--claude-4.5-sonnet",
 	}),
 )
 
-// Claude 1M context window
-llm, _ := provider.Model("anthropic--claude-4.5-sonnet",
+// Claude 1M context window (Claude 4.6+ has it natively)
+llm, _ := provider.Model("anthropic--claude-4.6-sonnet",
 	sapaicore.WithModelParams(map[string]any{
-		"anthropic_beta": []string{"context-1m-2025-08-07"},
-		"max_tokens":     200000,
+		"max_tokens": 200000,
 	}),
 )
 
@@ -120,16 +121,16 @@ llm, _ := provider.Model("o4-mini",
 |--------|-------------|
 | `WithEndpoint(url)` | SAP AI Core API base URL (required) |
 | `WithAuth(id, secret, authURL)` | OAuth2 credentials (required) |
-| `WithOrchestration()` | Orchestration mode: auto-discovers deployment |
+| `WithOrchestration()` | Orchestration mode: auto-discovers deployment (default) |
 | `WithDeploymentID(id)` | Orchestration mode: explicit deployment ID |
 | `WithDeployments(map)` | Foundation-models mode: per-model deployment IDs |
 | `WithResourceGroup(group)` | Resource group (default: `"default"`) |
 | `WithHTTPClient(client)` | Custom `*http.Client` |
 | `WithHeaders(headers)` | Extra HTTP headers on every request |
-| `WithTimeout(seconds)` | Server-side LLM timeout (1-1200s) |
-| `WithMaxRetries(n)` | Server-side retry count (0-5) |
+| `WithTimeout(seconds)` | Server-side LLM timeout in seconds (default: 600) |
+| `WithMaxRetries(n)` | Server-side retry count (default: 2) |
 
-Exactly one of `WithOrchestration`, `WithDeploymentID`, or `WithDeployments` is required.
+If none of `WithOrchestration`, `WithDeploymentID`, or `WithDeployments` is specified, orchestration auto-discovery is used. These three options are mutually exclusive.
 
 ### Model options
 
@@ -169,7 +170,7 @@ The model name and parameters are embedded in the request body. SAP AI Core rout
 
 In foundation-models mode, each model has its own deployment and the request goes to:
 ```
-POST {endpoint}/v2/inference/deployments/{perModelId}/chat/completions
+POST {endpoint}/v2/inference/deployments/{perModelId}/v1/chat/completions
 ```
 
 Both modes support streaming (SSE), tool calling, system prompts, and all standard ADK features.

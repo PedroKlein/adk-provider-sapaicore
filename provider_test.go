@@ -38,13 +38,6 @@ func TestNewProvider_ValidatesConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "no deployment config",
-			opts: []sapaicore.Option{
-				sapaicore.WithEndpoint("https://api.example.com"),
-				sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
-			},
-		},
-		{
 			name: "both deployment modes",
 			opts: []sapaicore.Option{
 				sapaicore.WithEndpoint("https://api.example.com"),
@@ -833,7 +826,7 @@ func TestOrchestration_TimeoutAndRetries(t *testing.T) {
 	}
 }
 
-func TestOrchestration_TimeoutOmittedWhenZero(t *testing.T) {
+func TestOrchestration_DefaultTimeoutAndRetries(t *testing.T) {
 	t.Parallel()
 
 	var capturedBody map[string]any
@@ -868,11 +861,11 @@ func TestOrchestration_TimeoutOmittedWhenZero(t *testing.T) {
 	pt, _ := modules["prompt_templating"].(map[string]any)
 	modelCfg, _ := pt["model"].(map[string]any)
 
-	if _, exists := modelCfg["timeout"]; exists {
-		t.Error("expected timeout to be omitted when zero")
+	if modelCfg["timeout"] != float64(600) {
+		t.Errorf("timeout = %v, want 600 (default)", modelCfg["timeout"])
 	}
 
-	if _, exists := modelCfg["max_retries"]; exists {
-		t.Error("expected max_retries to be omitted when zero")
+	if modelCfg["max_retries"] != float64(2) {
+		t.Errorf("max_retries = %v, want 2 (default)", modelCfg["max_retries"])
 	}
 }

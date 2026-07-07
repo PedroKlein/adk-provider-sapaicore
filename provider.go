@@ -23,6 +23,11 @@ var (
 
 const defaultResourceGroup = "default"
 
+const (
+	defaultTimeout    = 600
+	defaultMaxRetries = 2
+)
+
 type providerMode int
 
 const (
@@ -111,16 +116,16 @@ func WithDeployments(deployments map[string]string) Option {
 	}
 }
 
-// WithTimeout sets the server-side LLM request timeout in seconds (1–1200).
-// Zero means use the server default (600s).
+// WithTimeout sets the server-side LLM request timeout in seconds.
+// Default is 600 seconds.
 func WithTimeout(seconds int) Option {
 	return func(c *providerConfig) {
 		c.timeout = seconds
 	}
 }
 
-// WithMaxRetries sets the server-side retry count for LLM requests (0–5).
-// Zero means use the server default (2 retries).
+// WithMaxRetries sets the server-side retry count for LLM requests.
+// Default is 2 retries.
 func WithMaxRetries(n int) Option {
 	return func(c *providerConfig) {
 		c.maxRetries = n
@@ -135,13 +140,16 @@ type Provider struct {
 }
 
 // NewProvider validates the given options and returns a ready-to-use [Provider].
-// It returns [ErrMissingConfig] if required options are absent or conflicting.
+// It returns [ErrMissingConfig] if required options are absent.
 //
-// When [WithOrchestration] is used, NewProvider makes an HTTP call to discover
-// the orchestration deployment ID.
+// If no mode is specified, orchestration auto-discovery is used by default.
+// NewProvider makes an HTTP call to discover the orchestration deployment ID
+// when auto-discovery is active.
 func NewProvider(opts ...Option) (*Provider, error) {
 	cfg := providerConfig{
 		resourceGroup: defaultResourceGroup,
+		timeout:       defaultTimeout,
+		maxRetries:    defaultMaxRetries,
 	}
 
 	for _, opt := range opts {
@@ -277,8 +285,9 @@ func validateProviderConfig(cfg *providerConfig) error {
 		modes++
 	}
 
+	// Default to orchestration auto-discovery when no mode is specified.
 	if modes == 0 {
-		return fmt.Errorf("one of WithOrchestration, WithDeploymentID, or WithDeployments required: %w", ErrMissingConfig)
+		cfg.autoDiscover = true
 	}
 
 	if modes > 1 {
