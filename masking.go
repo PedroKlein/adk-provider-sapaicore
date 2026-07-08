@@ -7,7 +7,15 @@ const (
 	Pseudonymization MaskingMethod = "pseudonymization"
 )
 
-// DPIEntity identifies a standard entity type recognized by SAP Data Privacy Integration.
+// MaskFileInputMethod controls how file inputs interact with masking.
+// Required when file parts are present and masking is configured.
+type MaskFileInputMethod string
+
+const (
+	MaskFileAnonymization MaskFileInputMethod = "anonymization"
+	MaskFileSkip          MaskFileInputMethod = "skip"
+)
+
 type DPIEntity string
 
 const (
@@ -54,14 +62,34 @@ type CustomEntity struct {
 	Replacement string
 }
 
+type replacementStrategy int
+
+const (
+	strategyNone replacementStrategy = iota
+	strategyFabricated
+	strategyConstant
+)
+
 // MaskingEntity is either a standard [DPIEntity] or a [CustomEntity].
 type MaskingEntity struct {
 	standard *DPIEntity
 	custom   *CustomEntity
+	strategy replacementStrategy
+	value    string // only for strategyConstant on standard entities
 }
 
 func StandardEntity(entity DPIEntity) MaskingEntity {
 	return MaskingEntity{standard: &entity}
+}
+
+// FabricatedEntity replaces matches with realistic fake data appropriate to the entity type.
+func FabricatedEntity(entity DPIEntity) MaskingEntity {
+	return MaskingEntity{standard: &entity, strategy: strategyFabricated}
+}
+
+// ConstantEntity replaces matches with a fixed value followed by an incrementing number.
+func ConstantEntity(entity DPIEntity, replacement string) MaskingEntity {
+	return MaskingEntity{standard: &entity, strategy: strategyConstant, value: replacement}
 }
 
 func CustomMaskingEntity(regex, replacement string) MaskingEntity {
@@ -81,9 +109,12 @@ type MaskingConfig struct {
 
 	// MaskGroundingInput controls whether grounding module input is also masked.
 	MaskGroundingInput bool
+
+	// MaskFileInputMethod controls how file inputs are handled by masking.
+	// Required when file content blocks are present in the request.
+	MaskFileInputMethod MaskFileInputMethod
 }
 
-// StandardEntities converts a []DPIEntity to []MaskingEntity for use with [MaskingConfig].
 func StandardEntities(entities []DPIEntity) []MaskingEntity {
 	result := make([]MaskingEntity, len(entities))
 	for i, e := range entities {

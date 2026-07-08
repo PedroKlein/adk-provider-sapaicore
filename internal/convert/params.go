@@ -8,7 +8,7 @@ import (
 
 // ExtractParams maps ADK request config fields to the shared RequestParams
 // used by both foundation and orchestration mode request builders.
-func ExtractParams(req *genai.GenerateContentConfig, contents []*genai.Content, modelName, fallbackModel string, extraParams map[string]any) oai.RequestParams {
+func ExtractParams(req *genai.GenerateContentConfig, contents []*genai.Content, modelName, fallbackModel string, extraParams map[string]any) (oai.RequestParams, error) {
 	var (
 		systemInstruction *genai.Content
 		tools             []*genai.Tool
@@ -49,9 +49,14 @@ func ExtractParams(req *genai.GenerateContentConfig, contents []*genai.Content, 
 		modelName = fallbackModel
 	}
 
+	messages, err := Messages(systemInstruction, contents)
+	if err != nil {
+		return oai.RequestParams{}, err
+	}
+
 	return oai.RequestParams{
 		ModelName:        modelName,
-		Messages:         Messages(systemInstruction, contents),
+		Messages:         messages,
 		Tools:            Tools(tools),
 		ToolChoice:       ToolChoice(toolConfig),
 		Temperature:      temperature,
@@ -66,5 +71,5 @@ func ExtractParams(req *genai.GenerateContentConfig, contents []*genai.Content, 
 		Logprobs:         logprobs,
 		ResponseFormat:   ResponseFormat(responseMIME, responseSchema),
 		ExtraParams:      extraParams,
-	}
+	}, nil
 }

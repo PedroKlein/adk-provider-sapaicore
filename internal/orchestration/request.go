@@ -13,7 +13,11 @@ import (
 )
 
 func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, error) {
-	params := m.extractParams(req, doStream)
+	params, err := m.extractParams(req, doStream)
+	if err != nil {
+		return nil, err
+	}
+
 	modelParams := buildModelParams(params, doStream)
 
 	template := params.Messages
@@ -219,11 +223,15 @@ func buildModelParams(params oai.RequestParams, doStream bool) map[string]any {
 	return modelParams
 }
 
-func (m *Model) extractParams(req *model.LLMRequest, doStream bool) oai.RequestParams {
-	params := convert.ExtractParams(req.Config, req.Contents, req.Model, m.ModelName, m.ExtraParams)
+func (m *Model) extractParams(req *model.LLMRequest, doStream bool) (oai.RequestParams, error) {
+	params, err := convert.ExtractParams(req.Config, req.Contents, req.Model, m.ModelName, m.ExtraParams)
+	if err != nil {
+		return oai.RequestParams{}, fmt.Errorf("converting request content: %w", err)
+	}
+
 	params.Stream = doStream
 	params.Timeout = m.Timeout
 	params.MaxRetries = m.MaxRetries
 
-	return params
+	return params, nil
 }

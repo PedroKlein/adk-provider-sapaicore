@@ -141,7 +141,10 @@ func (m *Model) generateStream(ctx context.Context, req *model.LLMRequest) iter.
 }
 
 func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, error) {
-	params := m.extractParams(req, doStream)
+	params, err := m.extractParams(req, doStream)
+	if err != nil {
+		return nil, err
+	}
 
 	fr := oai.FoundationRequest{
 		Model:            params.ModelName,
@@ -177,9 +180,9 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 	}
 
 	if len(params.ExtraParams) == 0 {
-		body, err := json.Marshal(fr)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling foundation request: %w", err)
+		body, marshalErr := json.Marshal(fr)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("marshaling foundation request: %w", marshalErr)
 		}
 
 		return body, nil
@@ -209,11 +212,15 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 	return body, nil
 }
 
-func (m *Model) extractParams(req *model.LLMRequest, doStream bool) oai.RequestParams {
-	params := convert.ExtractParams(req.Config, req.Contents, req.Model, m.ModelName, m.ExtraParams)
+func (m *Model) extractParams(req *model.LLMRequest, doStream bool) (oai.RequestParams, error) {
+	params, err := convert.ExtractParams(req.Config, req.Contents, req.Model, m.ModelName, m.ExtraParams)
+	if err != nil {
+		return oai.RequestParams{}, fmt.Errorf("converting request content: %w", err)
+	}
+
 	params.Stream = doStream
 
-	return params
+	return params, nil
 }
 
 func (m *Model) parseResponse(resp *http.Response) (*model.LLMResponse, error) {

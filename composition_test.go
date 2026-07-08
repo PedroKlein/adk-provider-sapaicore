@@ -393,3 +393,109 @@ func TestComposition_FallbackStreamOverlapOnAllEntries(t *testing.T) {
 		}
 	}
 }
+
+func TestComposition_FabricatedEntityInRequestBody(t *testing.T) {
+	t.Parallel()
+
+	body := captureOrchestrationBody(t, func(p *sapaicore.Provider) (model.LLM, error) {
+		return p.Model("gpt-4.1")
+	}, sapaicore.WithMasking(sapaicore.MaskingConfig{
+		Method: sapaicore.Pseudonymization,
+		Entities: []sapaicore.MaskingEntity{
+			sapaicore.StandardEntity(sapaicore.EntityEmail),
+			sapaicore.FabricatedEntity(sapaicore.EntityPerson),
+			sapaicore.ConstantEntity(sapaicore.EntityPhone, "PHONE_REDACTED"),
+		},
+	}))
+
+	modules := extractModules(t, body)
+	masking := modules["masking"].(map[string]any)
+	providers := masking["providers"].([]any)
+	p := providers[0].(map[string]any)
+	entities := p["entities"].([]any)
+
+	if len(entities) != 3 {
+		t.Fatalf("entities len = %d, want 3", len(entities))
+	}
+
+	// Entity 0: StandardEntity(EntityEmail) — no replacement_strategy.
+	e0 := entities[0].(map[string]any)
+	if e0["type"] != "profile-email" {
+		t.Errorf("entity[0].type = %v, want profile-email", e0["type"])
+	}
+
+	if e0["replacement_strategy"] != nil {
+		t.Errorf("entity[0] should have no replacement_strategy, got %v", e0["replacement_strategy"])
+	}
+
+	// Entity 1: FabricatedEntity(EntityPerson) — fabricated_data.
+	e1 := entities[1].(map[string]any)
+	if e1["type"] != "profile-person" {
+		t.Errorf("entity[1].type = %v, want profile-person", e1["type"])
+	}
+
+	strat1 := e1["replacement_strategy"].(map[string]any)
+	if strat1["method"] != "fabricated_data" {
+		t.Errorf("entity[1].replacement_strategy.method = %v, want fabricated_data", strat1["method"])
+	}
+
+	if strat1["value"] != nil {
+		t.Errorf("fabricated_data should not have value, got %v", strat1["value"])
+	}
+
+	// Entity 2: ConstantEntity(EntityPhone, "PHONE_REDACTED") — constant.
+	e2 := entities[2].(map[string]any)
+	if e2["type"] != "profile-phone" {
+		t.Errorf("entity[2].type = %v, want profile-phone", e2["type"])
+	}
+
+	strat2 := e2["replacement_strategy"].(map[string]any)
+	if strat2["method"] != "constant" {
+		t.Errorf("entity[2].replacement_strategy.method = %v, want constant", strat2["method"])
+	}
+
+	if strat2["value"] != "PHONE_REDACTED" {
+		t.Errorf("entity[2].replacement_strategy.value = %v, want PHONE_REDACTED", strat2["value"])
+	}
+}
+
+func TestComposition_MaskFileInputMethodInRequestBody(t *testing.T) {
+	t.Parallel()
+
+	body := captureOrchestrationBody(t, func(p *sapaicore.Provider) (model.LLM, error) {
+		return p.Model("gpt-4.1")
+	}, sapaicore.WithMasking(sapaicore.MaskingConfig{
+		Method:              sapaicore.Anonymization,
+		Entities:            sapaicore.StandardEntities(sapaicore.CommonPIIEntities),
+		MaskFileInputMethod: sapaicore.MaskFileSkip,
+	}))
+
+	modules := extractModules(t, body)
+	masking := modules["masking"].(map[string]any)
+	providers := masking["providers"].([]any)
+	p := providers[0].(map[string]any)
+
+	if p["mask_file_input_method"] != "skip" {
+		t.Errorf("mask_file_input_method = %v, want skip", p["mask_file_input_method"])
+	}
+}
+
+func TestComposition_MaskFileInputMethodOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	body := captureOrchestrationBody(t, func(p *sapaicore.Provider) (model.LLM, error) {
+		return p.Model("gpt-4.1")
+	}, sapaicore.WithMasking(sapaicore.MaskingConfig{
+		Method:   sapaicore.Anonymization,
+		Entities: sapaicore.StandardEntities(sapaicore.CommonPIIEntities),
+	}))
+
+	modules := extractModules(t, body)
+	masking := modules["masking"].(map[string]any)
+	providers := masking["providers"].([]any)
+	p := providers[0].(map[string]any)
+
+	if p["mask_file_input_method"] != nil {
+		t.Errorf("mask_file_input_method should be omitted when empty, got %v", p["mask_file_input_method"])
+	}
+}

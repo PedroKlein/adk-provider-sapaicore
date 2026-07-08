@@ -71,7 +71,7 @@ func TestMessages_SystemAndUser(t *testing.T) {
 		{Parts: []*genai.Part{{Text: "Hello"}}, Role: "user"},
 	}
 
-	msgs := convert.Messages(sys, contents)
+	msgs, _ := convert.Messages(sys, contents)
 
 	if len(msgs) != 2 {
 		t.Fatalf("len = %d, want 2", len(msgs))
@@ -99,7 +99,7 @@ func TestMessages_SkipsNilContent(t *testing.T) {
 		nil,
 	}
 
-	msgs := convert.Messages(nil, contents)
+	msgs, _ := convert.Messages(nil, contents)
 
 	if len(msgs) != 1 {
 		t.Fatalf("len = %d, want 1", len(msgs))
@@ -122,7 +122,7 @@ func TestMessages_FunctionCallAndResponse(t *testing.T) {
 		}}}, Role: "user"},
 	}
 
-	msgs := convert.Messages(nil, contents)
+	msgs, _ := convert.Messages(nil, contents)
 
 	if len(msgs) != 2 {
 		t.Fatalf("len = %d, want 2", len(msgs))
@@ -159,7 +159,7 @@ func TestMessages_SkipsThoughtParts(t *testing.T) {
 		}, Role: "model"},
 	}
 
-	msgs := convert.Messages(nil, contents)
+	msgs, _ := convert.Messages(nil, contents)
 
 	if len(msgs) != 1 {
 		t.Fatalf("len = %d, want 1", len(msgs))
@@ -583,7 +583,7 @@ func TestExtractParams(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			params := convert.ExtractParams(tt.cfg, nil, "test-model", "fallback", nil)
+			params, _ := convert.ExtractParams(tt.cfg, nil, "test-model", "fallback", nil)
 			tt.assert(t, params)
 		})
 	}

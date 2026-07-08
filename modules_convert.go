@@ -91,22 +91,39 @@ func buildMaskingWire(cfg *MaskingConfig) *oai.MaskingModuleConfig {
 
 	entities := make([]oai.MaskingEntityConfig, len(cfg.Entities))
 	for i, e := range cfg.Entities {
-		if e.standard != nil {
-			entities[i] = oai.MaskingEntityConfig{Type: string(*e.standard)}
-		} else if e.custom != nil {
+		switch {
+		case e.custom != nil:
 			entities[i] = oai.MaskingEntityConfig{
 				Regex: e.custom.Regex,
-				ReplacementStrategy: &oai.DPIMethodConstant{
+				ReplacementStrategy: &oai.ReplacementStrategy{
 					Method: "constant",
 					Value:  e.custom.Replacement,
 				},
 			}
+		case e.standard != nil:
+			ec := oai.MaskingEntityConfig{Type: string(*e.standard)}
+
+			switch e.strategy {
+			case strategyFabricated:
+				ec.ReplacementStrategy = &oai.ReplacementStrategy{Method: "fabricated_data"}
+			case strategyConstant:
+				ec.ReplacementStrategy = &oai.ReplacementStrategy{Method: "constant", Value: e.value}
+			case strategyNone:
+				// No replacement_strategy — use DPI default.
+			}
+
+			entities[i] = ec
 		}
+	}
+
+	method := string(cfg.Method)
+	if method == "" {
+		method = string(Anonymization)
 	}
 
 	provider := oai.MaskingProviderConfig{
 		Type:     "sap_data_privacy_integration",
-		Method:   string(cfg.Method),
+		Method:   method,
 		Entities: entities,
 	}
 
@@ -116,6 +133,10 @@ func buildMaskingWire(cfg *MaskingConfig) *oai.MaskingModuleConfig {
 
 	if cfg.MaskGroundingInput {
 		provider.MaskGroundingInput = &oai.MaskGroundingInput{Enabled: true}
+	}
+
+	if cfg.MaskFileInputMethod != "" {
+		provider.MaskFileInputMethod = string(cfg.MaskFileInputMethod)
 	}
 
 	return &oai.MaskingModuleConfig{Providers: []oai.MaskingProviderConfig{provider}}

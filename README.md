@@ -120,6 +120,50 @@ contents := []*genai.Content{
 }
 ```
 
+## Multi-modal Input (Images & Files)
+
+Send images or documents alongside text using standard ADK `genai.Part` types:
+
+```go
+// Image from bytes (InlineData)
+req := &model.LLMRequest{
+    Contents: []*genai.Content{{
+        Role: "user",
+        Parts: []*genai.Part{
+            {Text: "What's in this image?"},
+            {InlineData: &genai.Blob{Data: pngBytes, MIMEType: "image/png"}},
+        },
+    }},
+}
+
+// Image from URL (FileData)
+req := &model.LLMRequest{
+    Contents: []*genai.Content{{
+        Role: "user",
+        Parts: []*genai.Part{
+            {Text: "Describe this image."},
+            {FileData: &genai.FileData{
+                FileURI:  "https://example.com/photo.jpg",
+                MIMEType: "image/jpeg",
+            }},
+        },
+    }},
+}
+
+// PDF document (Claude and Gemini only)
+req := &model.LLMRequest{
+    Contents: []*genai.Content{{
+        Role: "user",
+        Parts: []*genai.Part{
+            {Text: "Summarize this document."},
+            {InlineData: &genai.Blob{Data: pdfBytes, MIMEType: "application/pdf"}},
+        },
+    }},
+}
+```
+
+Supported image formats: PNG, JPEG, GIF, WebP. File support varies by model (Claude: PDF; Gemini: PDF, CSV, MP3).
+
 ## Content Filtering
 
 Enable input/output safety filtering with zero configuration:
@@ -187,6 +231,29 @@ sapaicore.WithMasking(sapaicore.MaskingConfig{
         sapaicore.StandardEntity(sapaicore.EntityPhone),
         sapaicore.CustomMaskingEntity(`\b[0-9]{2}-SAP-[0-9]{3}\b`, "REDACTED_ID"),
     },
+})
+```
+
+Replacement strategies for standard entities:
+
+```go
+sapaicore.WithMasking(sapaicore.MaskingConfig{
+    Method: sapaicore.Pseudonymization,
+    Entities: []sapaicore.MaskingEntity{
+        sapaicore.StandardEntity(sapaicore.EntityEmail),           // DPI default
+        sapaicore.FabricatedEntity(sapaicore.EntityPerson),       // realistic fake data
+        sapaicore.ConstantEntity(sapaicore.EntityPhone, "PHONE"), // fixed value + incrementing number
+    },
+})
+```
+
+When using file input with masking, set `MaskFileInputMethod`:
+
+```go
+sapaicore.WithMasking(sapaicore.MaskingConfig{
+    Method:              sapaicore.Anonymization,
+    Entities:            sapaicore.StandardEntities(sapaicore.CommonPIIEntities),
+    MaskFileInputMethod: sapaicore.MaskFileSkip, // or sapaicore.MaskFileAnonymization
 })
 ```
 
@@ -373,41 +440,15 @@ llm, _ := provider.Model("gpt-4.1-mini",
 | Resource groups | ✅ | ✅ | |
 | Refusal handling | ✅ | ✅ | ErrorCode="refusal" |
 | BeforeModelCallback (model override) | ✅ | ✅ | `req.Model` respected at runtime |
+| Multi-modal input (images) | ✅ | ✅ | InlineData (bytes) or FileData (HTTPS URL) |
+| File input (PDF, CSV, MP3) | ✅ | ✅ | InlineData → data URI; model support varies |
 | Content filtering | ✅ | - | Azure Content Safety + Llama Guard 3 8B |
 | Data masking (PII) | ✅ | - | SAP DPI: anonymization/pseudonymization |
+| Fabricated data masking | ✅ | - | `FabricatedEntity()` / `ConstantEntity()` strategies |
+| Mask file input | ✅ | - | `MaskFileInputMethod` for file+masking |
 | Translation | ✅ | - | SAP Document Translation: input/output |
 | Module fallback | ✅ | - | Try model A, fall back to model B |
 | Prompt caching | ✅ | - | Anthropic cache_control on system + tools |
-
-### Roadmap
-
-**Phase 1 - ADK field coverage** ✅ (v0.2.0):
-
-| Feature | ADK Field | Status |
-|---------|-----------|--------|
-| Seed (deterministic outputs) | `Seed` | ✅ Done |
-| TopK sampling | `TopK` | ✅ Done |
-| Logprobs in response | `ResponseLogprobs` + `Logprobs` → `LogprobsResult` | ✅ Done |
-| Tool choice (auto/none/required) | `ToolConfig` | ✅ Done |
-
-**Phase 2 - SAP AI Core orchestration modules** ✅ (v0.3.0):
-
-| Feature | SAP Module | Status |
-|---------|-----------|--------|
-| Content filtering | `filtering` | ✅ Done |
-| Data masking | `masking` | ✅ Done |
-| Translation | `translation` | ✅ Done |
-| Module fallback | fallback chain | ✅ Done |
-| Prompt caching | `cache_control` | ✅ Done |
-
-**Phase 3 - Planned:**
-
-| Feature | Notes |
-|---------|-------|
-| Multi-modal input (images) | Convert ADK `genai.Part` image data to SAP `image_url` content blocks |
-| File input | Convert ADK file parts to SAP `file` content blocks |
-| Fabricated data masking | `replacement_strategy: {method: "fabricated_data"}` on standard entities |
-| Translation `apply_to` selectors | Fine-grained control over which placeholders/roles get translated |
 
 ## API Reference
 

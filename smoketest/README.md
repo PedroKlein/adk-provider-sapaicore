@@ -111,6 +111,19 @@ Orchestration modules with contrast assertions proving each module is active:
 | `Fallback_RecoverFromInvalidModel` | Invalid primary model succeeds with fallback, errors without |
 | `PromptCaching_AnthropicSucceeds` | cache_control annotation accepted by Claude API |
 
+### `smoke_multimodal_test.go`
+
+Multi-modal input and advanced masking strategies:
+
+| Test | What it verifies |
+|------|------------------|
+| `ImageInput_InlineData` | 50x50 red PNG recognized by GPT, Claude, and Gemini (answers "red") |
+| `ImageInput_Streaming` | Image + streaming produces partial chunks and correct final answer |
+| `FileInput_PDF` | Minimal PDF with "BANANA" read correctly by Claude and Gemini |
+| `ImageInput_FileDataURL` | HTTPS URL passed to model (skips if deployment doesn't support external URLs) |
+| `FabricatedMasking_RedactsPII` | `FabricatedEntity` accepted by API; anonymization mode hides PII, pseudonymization unmasks |
+| `FileInput_WithMasking` | PDF + masking with `MaskFileSkip` — model still reads file content |
+
 ## Helpers (`helpers_test.go`)
 
 Shared test utilities that keep each test body short:

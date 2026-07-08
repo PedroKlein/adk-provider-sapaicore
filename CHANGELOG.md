@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-08
+
+### Added
+
+- Multi-modal input (images): `genai.Part.InlineData` with image MIME types (PNG, JPEG, GIF, WebP) converted to SAP `image_url` content blocks. Works across GPT, Claude, and Gemini in both streaming and non-streaming modes
+- File input (documents): `genai.Part.InlineData` with non-image MIME types (PDF, CSV, MP3) converted to SAP `file` content blocks. Model support varies (Claude: PDF; Gemini: PDF, CSV, MP3)
+- FileData URL passthrough: `genai.Part.FileData` with HTTP/HTTPS URLs passed directly to SAP AI Core. Unsupported URI schemes (gs://) return a clear error at conversion time
+- `FabricatedEntity(entity)`: masking entity that replaces matches with realistic fake data appropriate to the entity type
+- `ConstantEntity(entity, value)`: masking entity that replaces matches with a fixed value + incrementing number
+- `MaskFileInputMethod` field on `MaskingConfig`: controls how file inputs interact with masking (anonymization or skip). Required when file content and masking are used together
+- Smoke tests: image vision across 3 models, PDF extraction, streaming with images, fabricated masking, file+masking interaction
+
+### Changed
+
+- `convert.Messages()` and `convert.ExtractParams()` now return errors (internal signature change) to propagate URI validation failures from `genai.Part.FileData`
+- `ReplacementStrategy` wire type generalized to support both `constant` and `fabricated_data` methods (replaces the former `DPIMethodConstant`)
+
 ## [0.3.0] - 2026-07-08
 
 ### Added

@@ -10,8 +10,7 @@ import (
 	oai "github.com/PedroKlein/adk-provider-sapaicore/internal/openai"
 )
 
-// Messages converts a system instruction and content list into OpenAI chat messages.
-func Messages(systemInstruction *genai.Content, contents []*genai.Content) []oai.ChatMessage {
+func Messages(systemInstruction *genai.Content, contents []*genai.Content) ([]oai.ChatMessage, error) {
 	var messages []oai.ChatMessage
 
 	if systemInstruction != nil {
@@ -23,10 +22,15 @@ func Messages(systemInstruction *genai.Content, contents []*genai.Content) []oai
 			continue
 		}
 
-		messages = append(messages, content2Messages(content)...)
+		msgs, err := content2Messages(content)
+		if err != nil {
+			return nil, err
+		}
+
+		messages = append(messages, msgs...)
 	}
 
-	return messages
+	return messages, nil
 }
 
 func systemInstruction2Message(content *genai.Content) oai.ChatMessage {
@@ -44,10 +48,45 @@ func systemInstruction2Message(content *genai.Content) oai.ChatMessage {
 	}
 }
 
-// content2Messages transforms a single genai.Content into one or more messages.
-// A Content with FunctionResponse parts produces separate tool messages.
-func content2Messages(content *genai.Content) []oai.ChatMessage {
+// content2Messages handles three branching paths:
+//   - Multimodal (InlineData/FileData present) → content array + separate tool messages
+//   - Tool-calling (FunctionCall/FunctionResponse) → assistant message with tool_calls + tool messages
+//   - Text-only → plain string content
+func content2Messages(content *genai.Content) ([]oai.ChatMessage, error) {
 	role := MapRole(content.Role)
+
+	blocks, err := ContentBlocks(content.Parts)
+	if err != nil {
+		return nil, err
+	}
+
+	if blocks != nil {
+		var messages []oai.ChatMessage
+
+		// Collect tool calls that coexist with multimodal content.
+		var toolCalls []oai.ToolCall
+
+		for _, part := range content.Parts {
+			if part.FunctionCall != nil {
+				toolCalls = append(toolCalls, functionCall2ToolCall(part.FunctionCall))
+			}
+		}
+
+		messages = append(messages, oai.ChatMessage{
+			Role:      role,
+			Content:   blocks,
+			ToolCalls: toolCalls,
+		})
+
+		// FunctionResponse parts become separate tool messages.
+		for _, part := range content.Parts {
+			if part.FunctionResponse != nil {
+				messages = append(messages, functionResponse2Message(part.FunctionResponse))
+			}
+		}
+
+		return messages, nil
+	}
 
 	var textParts []string
 
@@ -78,7 +117,7 @@ func content2Messages(content *genai.Content) []oai.ChatMessage {
 		messages = append([]oai.ChatMessage{msg}, messages...)
 	}
 
-	return messages
+	return messages, nil
 }
 
 func functionCall2ToolCall(fc *genai.FunctionCall) oai.ToolCall {

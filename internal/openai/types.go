@@ -12,11 +12,46 @@ type ChatMessage struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
-// TextContentBlock is an element in a multi-block content array.
+// --- Content blocks (multi-block content arrays) ---
+
+// ContentBlock is implemented by all types that can appear in a multimodal
+// message content array. Prevents arbitrary types from being added to the slice.
+type ContentBlock interface {
+	contentBlock()
+}
+
 type TextContentBlock struct {
 	Type         string        `json:"type"`
 	Text         string        `json:"text"`
 	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+func (TextContentBlock) contentBlock() {}
+
+type ImageURLContentBlock struct {
+	Type         string        `json:"type"`
+	ImageURL     ImageURL      `json:"image_url"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+func (ImageURLContentBlock) contentBlock() {}
+
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type FileContentBlock struct {
+	Type         string        `json:"type"`
+	File         FileContent   `json:"file"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+func (FileContentBlock) contentBlock() {}
+
+type FileContent struct {
+	FileData string `json:"file_data"`
+	Filename string `json:"filename,omitempty"`
 }
 
 type ToolCall struct {
@@ -296,22 +331,26 @@ type MaskingModuleConfig struct {
 }
 
 type MaskingProviderConfig struct {
-	Type               string                `json:"type"`
-	Method             string                `json:"method"`
-	Entities           []MaskingEntityConfig `json:"entities"`
-	Allowlist          []string              `json:"allowlist,omitempty"`
-	MaskGroundingInput *MaskGroundingInput   `json:"mask_grounding_input,omitempty"`
+	Type                string                `json:"type"`
+	Method              string                `json:"method"`
+	Entities            []MaskingEntityConfig `json:"entities"`
+	Allowlist           []string              `json:"allowlist,omitempty"`
+	MaskGroundingInput  *MaskGroundingInput   `json:"mask_grounding_input,omitempty"`
+	MaskFileInputMethod string                `json:"mask_file_input_method,omitempty"`
 }
 
 type MaskingEntityConfig struct {
-	Type                string             `json:"type,omitempty"`
-	Regex               string             `json:"regex,omitempty"`
-	ReplacementStrategy *DPIMethodConstant `json:"replacement_strategy,omitempty"`
+	Type                string               `json:"type,omitempty"`
+	Regex               string               `json:"regex,omitempty"`
+	ReplacementStrategy *ReplacementStrategy `json:"replacement_strategy,omitempty"`
 }
 
-type DPIMethodConstant struct {
+// ReplacementStrategy represents a DPI replacement method.
+// For "constant": Method="constant", Value is required.
+// For "fabricated_data": Method="fabricated_data", Value is omitted.
+type ReplacementStrategy struct {
 	Method string `json:"method"`
-	Value  string `json:"value"`
+	Value  string `json:"value,omitempty"`
 }
 
 type MaskGroundingInput struct {
