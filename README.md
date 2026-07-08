@@ -183,14 +183,17 @@ llm, _ := provider.Model("gpt-4.1-mini",
 | Streaming (SSE) | ✅ | ✅ | Partial chunks + final aggregated response |
 | Tool calling | ✅ | ✅ | Function calls and function results |
 | Tool calling (streaming) | ✅ | ✅ | Deltas assembled into complete calls |
+| Tool choice (auto/none/required) | ✅ | ✅ | Via `ToolConfig.FunctionCallingConfig` |
 | System instructions | ✅ | ✅ | |
 | Multi-turn conversation | ✅ | ✅ | Full message history |
-| Temperature / TopP | ✅ | ✅ | |
+| Temperature / TopP / TopK | ✅ | ✅ | |
+| Seed (deterministic outputs) | ✅ | ✅ | Best-effort determinism |
 | MaxOutputTokens | ✅ | ✅ | |
 | StopSequences | ✅ | ✅ | |
 | FrequencyPenalty / PresencePenalty | ✅ | ✅ | |
+| Logprobs in response | ✅ | ✅ | `ResponseLogprobs` + `Logprobs` → `LogprobsResult` |
 | JSON response format | ✅ | ✅ | With schema validation |
-| Extra model params (`WithModelParams`) | ✅ | ✅ | Thinking, reasoning_effort, logprobs, etc. |
+| Extra model params (`WithModelParams`) | ✅ | ✅ | Thinking, reasoning_effort, etc. |
 | Server-side timeout/retries | ✅ | - | Orchestration only |
 | OAuth2 token caching | ✅ | ✅ | Auto-refresh before expiry |
 | Auto-discovery | ✅ | - | Finds orchestration deployment automatically |
@@ -202,16 +205,14 @@ llm, _ := provider.Model("gpt-4.1-mini",
 
 ### Roadmap
 
-**Phase 1 - ADK field coverage** (extract from `GenerateContentConfig`, no new APIs):
+**Phase 1 - ADK field coverage** ✅ (v0.2.0):
 
 | Feature | ADK Field | Status |
 |---------|-----------|--------|
-| Seed (deterministic outputs) | `Seed` | Planned |
-| TopK sampling | `TopK` | Planned |
-| Logprobs in response | `LogprobsResult` | Planned |
-| Tool choice (auto/none/required) | `ToolConfig` | Planned (foundation mode only*) |
-
-*\*SAP AI Core orchestration mode doesn't support `tool_choice` yet ([tracking issue](https://github.com/SAP/ai-sdk-js/issues/1500)).*
+| Seed (deterministic outputs) | `Seed` | ✅ Done |
+| TopK sampling | `TopK` | ✅ Done |
+| Logprobs in response | `ResponseLogprobs` + `Logprobs` → `LogprobsResult` | ✅ Done |
+| Tool choice (auto/none/required) | `ToolConfig` | ✅ Done |
 
 **Phase 2 - SAP AI Core orchestration modules** (new `With*` provider options):
 
@@ -228,7 +229,6 @@ llm, _ := provider.Model("gpt-4.1-mini",
 
 | Feature | Notes |
 |---------|-------|
-| Tool choice in orchestration mode | Waiting on SAP to ship ([#1500](https://github.com/SAP/ai-sdk-js/issues/1500)) |
 | Multi-modal input (images) | SAP supports `image_url` in messages |
 
 ## API Reference
@@ -310,6 +310,7 @@ Or run individual tasks:
 mise run build
 mise run lint
 mise run test
+mise run fix   # auto-fix lint issues (wsl whitespace, gofmt, etc.)
 ```
 
 ### Smoke Tests

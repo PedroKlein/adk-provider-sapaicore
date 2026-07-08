@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-07-08
+
+### Added
+
+- Seed support: extract `Seed` from `GenerateContentConfig` for deterministic outputs
+- TopK sampling: extract `TopK` from config, forwarded as `top_k` to models that support it
+- Logprobs in response: `ResponseLogprobs` + `Logprobs` config fields now sent in requests; response logprobs parsed and returned as `LLMResponse.LogprobsResult` (both streaming and non-streaming)
+- Streaming logprobs aggregation: per-chunk logprobs accumulated and populated in the final streamed response
+- Token ID mapping: `TokenID` from OpenAI logprobs responses mapped to `genai.LogprobsResultCandidate.TokenID`
+- Tool choice: `ToolConfig.FunctionCallingConfig` mapped to OpenAI `tool_choice` format (auto/none/required/named function) in both modes
+- `WithModelParams` precedence documented: extra params override first-class config fields when keys collide
+- `mise run fix` task for auto-fixing lint issues locally
+- Smoke tests: seed determinism (contrast), logprobs (contrast + streaming), tool choice (contrast), topK
+- Foundation mode provider helper for smoke tests (`newFoundationProvider`)
+
 ## [0.1.0] - 2025-07-08
 
 ### Added

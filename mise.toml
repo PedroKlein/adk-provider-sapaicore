@@ -16,6 +16,10 @@ run = "go test -race ./..."
 description = "Run golangci-lint"
 run = "golangci-lint run ./..."
 
+[tasks.fix]
+description = "Auto-fix lint issues (wsl whitespace, gofmt, etc.)"
+run = "golangci-lint run --fix ./..."
+
 [tasks.vet]
 description = "Run go vet"
 run = "go vet ./..."
