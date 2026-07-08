@@ -181,7 +181,9 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 	}
 
 	var merged map[string]any
-	if err := json.Unmarshal(base, &merged); err != nil {
+
+	err = json.Unmarshal(base, &merged)
+	if err != nil {
 		return nil, fmt.Errorf("preparing extra params merge: %w", err)
 	}
 
