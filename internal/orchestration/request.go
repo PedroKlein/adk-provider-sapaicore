@@ -41,8 +41,8 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 				Name:       params.ModelName,
 				Version:    "latest",
 				Params:     modelParams,
-				Timeout:    params.Timeout,
-				MaxRetries: params.MaxRetries,
+				Timeout:    m.Timeout,
+				MaxRetries: m.MaxRetries,
 			},
 		},
 		Filtering:   m.Filtering,
@@ -102,8 +102,8 @@ func (m *Model) marshalModules(primary oai.ModuleConfigs, params oai.RequestPara
 					Name:       fallbackModel,
 					Version:    "latest",
 					Params:     fallbackParams,
-					Timeout:    params.Timeout,
-					MaxRetries: params.MaxRetries,
+					Timeout:    m.Timeout,
+					MaxRetries: m.MaxRetries,
 				},
 			},
 			Filtering:   primary.Filtering,
@@ -225,8 +225,6 @@ func (m *Model) extractParams(req *model.LLMRequest, doStream bool) (oai.Request
 	}
 
 	params.Stream = doStream
-	params.Timeout = m.Timeout
-	params.MaxRetries = m.MaxRetries
 
 	return params, nil
 }

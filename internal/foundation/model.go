@@ -143,6 +143,10 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 		return nil, err
 	}
 
+	if len(params.ExtraParams) > 0 {
+		return m.buildRequestBodyWithExtras(params, doStream)
+	}
+
 	fr := oai.FoundationRequest{
 		Model:            params.ModelName,
 		Messages:         params.Messages,
@@ -176,37 +180,76 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 		fr.StreamOptions = &oai.StreamOptions{IncludeUsage: true}
 	}
 
-	if len(params.ExtraParams) == 0 {
-		body, marshalErr := json.Marshal(fr)
-		if marshalErr != nil {
-			return nil, fmt.Errorf("marshaling foundation request: %w", marshalErr)
-		}
-
-		return body, nil
-	}
-
-	// Merge extra params into the top-level JSON object so that
-	// model-specific fields (e.g. reasoning_effort, thinking) are forwarded.
-	base, err := json.Marshal(fr)
+	body, err := json.Marshal(fr)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling foundation request: %w", err)
 	}
 
-	var merged map[string]any
+	return body, nil
+}
 
-	err = json.Unmarshal(base, &merged)
-	if err != nil {
-		return nil, fmt.Errorf("preparing extra params merge: %w", err)
+// buildRequestBodyWithExtras builds the request as a map to merge extra params
+// directly, avoiding a marshal → unmarshal → re-marshal round-trip.
+func (m *Model) buildRequestBodyWithExtras(params oai.RequestParams, doStream bool) ([]byte, error) {
+	obj := map[string]any{
+		"model":    params.ModelName,
+		"messages": params.Messages,
+		"stream":   doStream,
 	}
 
-	maps.Copy(merged, params.ExtraParams)
+	if len(params.Tools) > 0 {
+		obj["tools"] = params.Tools
+	}
 
-	body, err := json.Marshal(merged)
+	if params.ToolChoice != nil {
+		obj["tool_choice"] = params.ToolChoice
+	}
+
+	setIfNotNil(obj, "temperature", params.Temperature)
+	setIfNotNil(obj, "top_p", params.TopP)
+	setIfNotNil(obj, "top_k", params.TopK)
+	setIfNotNil(obj, "seed", params.Seed)
+	setIfNotNil(obj, "frequency_penalty", params.FrequencyPenalty)
+	setIfNotNil(obj, "presence_penalty", params.PresencePenalty)
+
+	if params.MaxTokens > 0 {
+		obj["max_tokens"] = params.MaxTokens
+	}
+
+	if len(params.Stop) > 0 {
+		obj["stop"] = params.Stop
+	}
+
+	if params.ResponseLogprobs {
+		obj["logprobs"] = true
+	}
+
+	if params.Logprobs != nil {
+		obj["top_logprobs"] = *params.Logprobs
+	}
+
+	if params.ResponseFormat != nil {
+		obj["response_format"] = params.ResponseFormat
+	}
+
+	if doStream {
+		obj["stream_options"] = map[string]any{"include_usage": true}
+	}
+
+	maps.Copy(obj, params.ExtraParams)
+
+	body, err := json.Marshal(obj)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling foundation request with extra params: %w", err)
+		return nil, fmt.Errorf("marshaling foundation request: %w", err)
 	}
 
 	return body, nil
+}
+
+func setIfNotNil[T any](m map[string]any, key string, ptr *T) {
+	if ptr != nil {
+		m[key] = *ptr
+	}
 }
 
 func (m *Model) extractParams(req *model.LLMRequest, doStream bool) (oai.RequestParams, error) {
