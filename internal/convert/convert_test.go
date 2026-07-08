@@ -81,8 +81,8 @@ func TestMessages_SystemAndUser(t *testing.T) {
 		t.Errorf("msgs[0].Role = %q, want system", msgs[0].Role)
 	}
 
-	if *msgs[0].Content != "Be helpful." {
-		t.Errorf("msgs[0].Content = %q, want %q", *msgs[0].Content, "Be helpful.")
+	if c, ok := msgs[0].Content.(*string); !ok || *c != "Be helpful." {
+		t.Errorf("msgs[0].Content = %v, want %q", msgs[0].Content, "Be helpful.")
 	}
 
 	if msgs[1].Role != "user" {
@@ -165,8 +165,8 @@ func TestMessages_SkipsThoughtParts(t *testing.T) {
 		t.Fatalf("len = %d, want 1", len(msgs))
 	}
 
-	if *msgs[0].Content != "Hello!" {
-		t.Errorf("content = %q, want %q", *msgs[0].Content, "Hello!")
+	if c, ok := msgs[0].Content.(*string); !ok || *c != "Hello!" {
+		t.Errorf("content = %v, want %q", msgs[0].Content, "Hello!")
 	}
 }
 

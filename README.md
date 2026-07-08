@@ -120,6 +120,177 @@ contents := []*genai.Content{
 }
 ```
 
+## Content Filtering
+
+Enable input/output safety filtering with zero configuration:
+
+```go
+// Strictest defaults: Azure Content Safety ALLOW_SAFE + prompt_shield on all categories.
+provider, _ := sapaicore.NewProvider(ctx,
+    sapaicore.WithEndpoint(endpoint),
+    sapaicore.WithAuth(clientID, clientSecret, authURL),
+    sapaicore.WithFiltering(nil), // nil = sensible defaults
+)
+```
+
+Or customize thresholds and providers:
+
+```go
+provider, _ := sapaicore.NewProvider(ctx,
+    sapaicore.WithEndpoint(endpoint),
+    sapaicore.WithAuth(clientID, clientSecret, authURL),
+    sapaicore.WithFiltering(&sapaicore.FilteringConfig{
+        Input: &sapaicore.InputFilterConfig{
+            AzureContentSafety: &sapaicore.AzureContentSafetyConfig{
+                Hate:         sapaicore.AzureThresholdAllowSafeLow,
+                SelfHarm:     sapaicore.AzureThresholdAllowSafe,
+                Sexual:       sapaicore.AzureThresholdAllowSafe,
+                Violence:     sapaicore.AzureThresholdAllowSafeLow,
+                PromptShield: true,
+            },
+            LlamaGuard: &sapaicore.LlamaGuardConfig{
+                Hate: true,
+                ChildExploitation: true,
+            },
+        },
+        Output: &sapaicore.OutputFilterConfig{
+            AzureContentSafety: &sapaicore.AzureContentSafetyConfig{
+                Hate: sapaicore.AzureThresholdAllowSafe,
+            },
+        },
+    }),
+)
+```
+
+## Data Masking
+
+Redact PII before messages reach the LLM:
+
+```go
+provider, _ := sapaicore.NewProvider(ctx,
+    sapaicore.WithEndpoint(endpoint),
+    sapaicore.WithAuth(clientID, clientSecret, authURL),
+    sapaicore.WithMasking(sapaicore.MaskingConfig{
+        Method:   sapaicore.Anonymization,
+        Entities: sapaicore.StandardEntities(sapaicore.CommonPIIEntities),
+        Allowlist: []string{"SAP", "Joule"},
+    }),
+)
+```
+
+Custom regex entities:
+
+```go
+sapaicore.WithMasking(sapaicore.MaskingConfig{
+    Entities: []sapaicore.MaskingEntity{
+        sapaicore.StandardEntity(sapaicore.EntityEmail),
+        sapaicore.StandardEntity(sapaicore.EntityPhone),
+        sapaicore.CustomMaskingEntity(`\b[0-9]{2}-SAP-[0-9]{3}\b`, "REDACTED_ID"),
+    },
+})
+```
+
+## Translation
+
+Translate input before the LLM or output after generation:
+
+```go
+provider, _ := sapaicore.NewProvider(ctx,
+    sapaicore.WithEndpoint(endpoint),
+    sapaicore.WithAuth(clientID, clientSecret, authURL),
+    sapaicore.WithTranslation(sapaicore.TranslationConfig{
+        Output: &sapaicore.TranslationOutputConfig{
+            TargetLanguage: "de-DE",
+        },
+    }),
+)
+```
+
+## Module Fallback
+
+Try the primary model first, fall back to alternatives on failure:
+
+```go
+llm, _ := provider.Model("gpt-4.1",
+    sapaicore.WithModelFallback("gpt-4.1-mini", "gpt-4.1-nano"),
+)
+```
+
+Fallback models inherit all module configurations (filtering, masking, translation).
+
+## Prompt Caching
+
+Enable Anthropic prompt caching (auto-annotates system message and tools with `cache_control`):
+
+```go
+llm, _ := provider.Model("anthropic--claude-4.5-sonnet",
+    sapaicore.WithModelPromptCaching(),
+)
+```
+
+For 1-hour TTL on supported models (Claude Opus 4.5, Haiku 4.5, Sonnet 4.5):
+
+```go
+llm, _ := provider.Model("anthropic--claude-4.5-sonnet",
+    sapaicore.WithModelPromptCaching(sapaicore.CacheTTL1h),
+)
+```
+
+## Module Composition
+
+Modules can be set at provider level (defaults for all models) and overridden per-model:
+
+```go
+// Provider-level: all models get filtering + masking.
+provider, _ := sapaicore.NewProvider(ctx,
+    sapaicore.WithEndpoint(endpoint),
+    sapaicore.WithAuth(clientID, clientSecret, authURL),
+    sapaicore.WithFiltering(nil),
+    sapaicore.WithMasking(sapaicore.MaskingConfig{
+        Entities: sapaicore.StandardEntities(sapaicore.CommonPIIEntities),
+    }),
+)
+
+// This model inherits both filtering and masking.
+llm1, _ := provider.Model("gpt-4.1")
+
+// This model replaces filtering with a permissive config, keeps masking.
+llm2, _ := provider.Model("gpt-4.1-mini",
+    sapaicore.WithModelFiltering(&sapaicore.FilteringConfig{
+        Input: &sapaicore.InputFilterConfig{
+            AzureContentSafety: &sapaicore.AzureContentSafetyConfig{
+                Hate: sapaicore.AzureThresholdAllowAll,
+            },
+        },
+    }),
+)
+
+// This model has no filtering at all, keeps masking.
+llm3, _ := provider.Model("gpt-4.1-mini", sapaicore.WithoutFiltering())
+```
+
+Composition rules:
+- Same module at both levels → model replaces provider
+- Different modules → both apply
+- `Without*()` → explicitly removes inherited module
+
+Orchestration modules in foundation-models mode produce an error at `Model()` time:
+
+```go
+// This returns ErrMissingConfig — modules require orchestration mode.
+provider, _ := sapaicore.NewProvider(ctx,
+    sapaicore.WithEndpoint(endpoint),
+    sapaicore.WithAuth(id, secret, url),
+    sapaicore.WithDeployments(map[string]string{"gpt-4.1": "d1"}),
+    sapaicore.WithFiltering(nil), // ← orchestration module
+)
+_, err := provider.Model("gpt-4.1") // err: orchestration modules require orchestration mode
+```
+
+Invalid configs also error at `Model()` time:
+- `TranslationConfig` with neither Input nor Output set
+- `MaskingConfig` with empty Entities
+
 ## Foundation-Models Mode
 
 For per-model deployments (dedicated capacity, custom fine-tunes):
@@ -202,6 +373,11 @@ llm, _ := provider.Model("gpt-4.1-mini",
 | Resource groups | ✅ | ✅ | |
 | Refusal handling | ✅ | ✅ | ErrorCode="refusal" |
 | BeforeModelCallback (model override) | ✅ | ✅ | `req.Model` respected at runtime |
+| Content filtering | ✅ | - | Azure Content Safety + Llama Guard 3 8B |
+| Data masking (PII) | ✅ | - | SAP DPI: anonymization/pseudonymization |
+| Translation | ✅ | - | SAP Document Translation: input/output |
+| Module fallback | ✅ | - | Try model A, fall back to model B |
+| Prompt caching | ✅ | - | Anthropic cache_control on system + tools |
 
 ### Roadmap
 
@@ -214,22 +390,24 @@ llm, _ := provider.Model("gpt-4.1-mini",
 | Logprobs in response | `ResponseLogprobs` + `Logprobs` → `LogprobsResult` | ✅ Done |
 | Tool choice (auto/none/required) | `ToolConfig` | ✅ Done |
 
-**Phase 2 - SAP AI Core orchestration modules** (new `With*` provider options):
+**Phase 2 - SAP AI Core orchestration modules** ✅ (v0.3.0):
 
-| Feature | SAP Module | Description |
-|---------|-----------|-------------|
-| Content filtering | `filtering` | Input/output safety filtering |
-| Data masking | `masking` | PII redaction before sending to LLM |
-| Document grounding (RAG) | `grounding` | Retrieve from enterprise knowledge bases |
-| Translation | `translation` | Input/output language translation |
-| Module fallback | fallback chain | Try model A, fall back to model B |
-| Prompt caching | `cache_control` | Cost reduction for repeated context |
+| Feature | SAP Module | Status |
+|---------|-----------|--------|
+| Content filtering | `filtering` | ✅ Done |
+| Data masking | `masking` | ✅ Done |
+| Translation | `translation` | ✅ Done |
+| Module fallback | fallback chain | ✅ Done |
+| Prompt caching | `cache_control` | ✅ Done |
 
-**Phase 3 - Pending SAP AI Core support:**
+**Phase 3 - Planned:**
 
 | Feature | Notes |
 |---------|-------|
-| Multi-modal input (images) | SAP supports `image_url` in messages |
+| Multi-modal input (images) | Convert ADK `genai.Part` image data to SAP `image_url` content blocks |
+| File input | Convert ADK file parts to SAP `file` content blocks |
+| Fabricated data masking | `replacement_strategy: {method: "fabricated_data"}` on standard entities |
+| Translation `apply_to` selectors | Fine-grained control over which placeholders/roles get translated |
 
 ## API Reference
 
@@ -247,6 +425,12 @@ llm, _ := provider.Model("gpt-4.1-mini",
 | `WithHeaders(headers)` | Extra HTTP headers on every request |
 | `WithTimeout(seconds)` | Server-side LLM timeout in seconds (default: 600) |
 | `WithMaxRetries(n)` | Server-side retry count (default: 2) |
+| `WithFiltering(cfg)` | Content filtering (nil = strict defaults). Orchestration only |
+| `WithMasking(cfg)` | PII data masking. Orchestration only |
+| `WithTranslation(cfg)` | Input/output translation. Orchestration only |
+| `WithFallback(models...)` | Model fallback chain. Orchestration only |
+| `WithPromptCaching(ttl...)` | Anthropic prompt caching. Default 5m TTL. Orchestration only |
+| `WithStreamOptions(opts)` | Global stream chunk_size/delimiters. Orchestration only |
 
 If none of `WithOrchestration`, `WithDeploymentID`, or `WithDeployments` is specified, orchestration auto-discovery is used. These three options are mutually exclusive.
 
@@ -255,6 +439,14 @@ If none of `WithOrchestration`, `WithDeploymentID`, or `WithDeployments` is spec
 | Option | Description |
 |--------|-------------|
 | `WithModelParams(map)` | Extra params forwarded to the model |
+| `WithModelFiltering(cfg)` | Override provider filtering (nil = strict defaults) |
+| `WithoutFiltering()` | Remove inherited filtering |
+| `WithModelMasking(cfg)` | Override provider masking |
+| `WithoutMasking()` | Remove inherited masking |
+| `WithModelTranslation(cfg)` | Override provider translation |
+| `WithoutTranslation()` | Remove inherited translation |
+| `WithModelFallback(models...)` | Model-level fallback chain |
+| `WithModelPromptCaching(ttl...)` | Enable prompt caching for this model |
 
 ### Errors
 

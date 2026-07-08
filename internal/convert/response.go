@@ -32,8 +32,15 @@ func ChoiceToResponse(choice oai.ChatChoice, usage *oai.ChatUsage, modelVersion 
 func responseMessage2Content(msg oai.ChatMessage) *genai.Content {
 	var parts []*genai.Part
 
-	if msg.Content != nil && *msg.Content != "" {
-		parts = append(parts, &genai.Part{Text: *msg.Content})
+	switch c := msg.Content.(type) {
+	case *string:
+		if c != nil && *c != "" {
+			parts = append(parts, &genai.Part{Text: *c})
+		}
+	case string:
+		if c != "" {
+			parts = append(parts, &genai.Part{Text: c})
+		}
 	}
 
 	for _, tc := range msg.ToolCalls {

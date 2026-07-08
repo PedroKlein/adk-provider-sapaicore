@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-08
+
+### Added
+
+- Content filtering: `WithFiltering(cfg)` enables Azure Content Safety and/or Llama Guard 3 8B on input/output. Pass nil for strict defaults (ALLOW_SAFE on all categories + prompt_shield)
+- Data masking: `WithMasking(cfg)` enables SAP DPI anonymization/pseudonymization. Supports 25 standard entity types, custom regex entities, and allowlists. `CommonPIIEntities` preset for quick setup
+- Translation: `WithTranslation(cfg)` enables SAP Document Translation on input and/or output
+- Module fallback: `WithFallback(models...)` sends a modules array so the service tries each model in order until one succeeds
+- Prompt caching: `WithPromptCaching(ttl...)` adds Anthropic `cache_control` annotations to system messages and tool definitions. Default 5m TTL, optional `CacheTTL1h` for supported models
+- Module composition: provider-level defaults + model-level overrides. Same module at both levels → model replaces provider. `WithoutFiltering()`, `WithoutMasking()`, `WithoutTranslation()` for explicit opt-out
+- Global stream options: `WithStreamOptions(opts)` for chunk_size and delimiters (required for translation + streaming)
+- Validation: foundation mode + orchestration modules returns `ErrMissingConfig` at `Model()` time. Empty translation config or empty masking entities also error
+- Smoke tests: filtering contrast, masking PII redaction, translation output, fallback recovery, prompt caching acceptance
+
 ## [0.2.0] - 2025-07-08
 
 ### Added

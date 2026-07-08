@@ -99,6 +99,18 @@ Alternative provider configurations and remaining API surface:
 | `Refusal` | Model refuses harmful content (refusal field or safety finish) |
 | `StreamingUsageMetadata` | Streaming final response includes token counts |
 
+### `smoke_modules_test.go`
+
+Orchestration modules with contrast assertions proving each module is active:
+
+| Test | What it verifies |
+|------|------------------|
+| `Filtering_BlocksHarmfulInput` | Harmful prompt blocked with filtering, would succeed without |
+| `Masking_RedactsPII` | Contrast: email/phone absent from response with masking, present without |
+| `Translation_TranslatesOutput` | Contrast: response in German with translation, English without |
+| `Fallback_RecoverFromInvalidModel` | Invalid primary model succeeds with fallback, errors without |
+| `PromptCaching_AnthropicSucceeds` | cache_control annotation accepted by Claude API |
+
 ## Helpers (`helpers_test.go`)
 
 Shared test utilities that keep each test body short:
@@ -114,9 +126,10 @@ Shared test utilities that keep each test body short:
 
 ## Adding Tests
 
-1. Pick the file that matches the concern (basic, tools, advanced, providers)
+1. Pick the file that matches the concern (basic, tools, advanced, providers, modules)
 2. Use the helpers to keep tests under 30 lines
 3. Set a timeout with `withTimeout(t, ...)` appropriate for the operation
 4. Use `t.Logf` for useful debug output (shown with `-v`)
 5. Prefix test names with `TestSmoke_`
 6. For tests that need extra env vars, use `envOrSkip` so they skip gracefully
+7. Module tests use the **contrast pattern**: test with module vs without, assert observable difference

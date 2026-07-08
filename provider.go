@@ -14,7 +14,6 @@ import (
 	"github.com/PedroKlein/adk-provider-sapaicore/internal/orchestration"
 )
 
-// Sentinel errors.
 var (
 	ErrMissingConfig      = errors.New("sapaicore: missing required configuration")
 	ErrDeploymentNotFound = errors.New("sapaicore: deployment not found for model")
@@ -36,7 +35,6 @@ const (
 	providerModeFoundation
 )
 
-// providerConfig holds validated provider settings.
 type providerConfig struct {
 	endpoint      string
 	clientID      string
@@ -50,12 +48,12 @@ type providerConfig struct {
 	autoDiscover  bool
 	timeout       int
 	maxRetries    int
+	modules       moduleConfigs
 }
 
-// Option configures a [Provider]. Pass options to [NewProvider].
+// Option configures a [Provider].
 type Option func(*providerConfig)
 
-// WithEndpoint sets the SAP AI Core API base URL.
 func WithEndpoint(endpoint string) Option {
 	return func(c *providerConfig) {
 		c.endpoint = endpoint
@@ -72,21 +70,18 @@ func WithAuth(clientID, clientSecret, authURL string) Option {
 	}
 }
 
-// WithResourceGroup sets the SAP AI Core resource group. Defaults to "default".
 func WithResourceGroup(group string) Option {
 	return func(c *providerConfig) {
 		c.resourceGroup = group
 	}
 }
 
-// WithHTTPClient sets a custom HTTP client for all requests.
 func WithHTTPClient(client *http.Client) Option {
 	return func(c *providerConfig) {
 		c.httpClient = client
 	}
 }
 
-// WithHeaders adds custom HTTP headers to every request.
 func WithHeaders(headers http.Header) Option {
 	return func(c *providerConfig) {
 		c.headers = headers
@@ -129,6 +124,67 @@ func WithTimeout(seconds int) Option {
 func WithMaxRetries(n int) Option {
 	return func(c *providerConfig) {
 		c.maxRetries = n
+	}
+}
+
+// WithFiltering enables content filtering. Orchestration-mode only.
+//
+// Pass nil for sensible defaults: Azure Content Safety ALLOW_SAFE on all
+// categories with prompt_shield, applied to both input and output.
+func WithFiltering(cfg *FilteringConfig) Option {
+	return func(c *providerConfig) {
+		if cfg == nil {
+			c.modules.filtering = defaultFilteringConfig()
+		} else {
+			c.modules.filtering = cfg
+		}
+	}
+}
+
+// WithMasking enables PII redaction before messages reach the LLM.
+// Orchestration-mode only. Method defaults to [Anonymization] if empty.
+func WithMasking(cfg MaskingConfig) Option {
+	return func(c *providerConfig) {
+		if cfg.Method == "" {
+			cfg.Method = Anonymization
+		}
+
+		c.modules.masking = &cfg
+	}
+}
+
+// WithTranslation enables input/output translation. Orchestration-mode only.
+func WithTranslation(cfg TranslationConfig) Option {
+	return func(c *providerConfig) {
+		c.modules.translation = &cfg
+	}
+}
+
+// WithFallback configures model fallback. The service tries the primary model
+// first, then each fallback in order. Fallback models inherit all module configs.
+// Orchestration-mode only.
+func WithFallback(models ...string) Option {
+	return func(c *providerConfig) {
+		c.modules.fallbackModels = models
+	}
+}
+
+// WithPromptCaching adds cache_control annotations to the system message and
+// tool definitions. Orchestration-mode only.
+// Non-Anthropic models ignore the annotation.
+// Default TTL is 5m. Pass [CacheTTL1h] for 1-hour caching on supported models.
+func WithPromptCaching(ttl ...CacheTTL) Option {
+	return func(c *providerConfig) {
+		c.modules.promptCaching = true
+		if len(ttl) > 0 {
+			c.modules.cacheTTL = ttl[0]
+		}
+	}
+}
+
+func WithStreamOptions(opts StreamOptions) Option {
+	return func(c *providerConfig) {
+		c.modules.streamOptions = &opts
 	}
 }
 
@@ -201,6 +257,7 @@ type ModelOption func(*modelConfig)
 
 type modelConfig struct {
 	extraParams map[string]any
+	modules     moduleConfigs
 }
 
 // WithModelParams adds extra parameters forwarded directly to the model.
@@ -213,6 +270,69 @@ type modelConfig struct {
 func WithModelParams(params map[string]any) ModelOption {
 	return func(c *modelConfig) {
 		c.extraParams = params
+	}
+}
+
+// WithModelFiltering overrides provider-level filtering for this model.
+// Pass nil for the same defaults as [WithFiltering].
+func WithModelFiltering(cfg *FilteringConfig) ModelOption {
+	return func(c *modelConfig) {
+		if cfg == nil {
+			c.modules.filtering = defaultFilteringConfig()
+		} else {
+			c.modules.filtering = cfg
+		}
+	}
+}
+
+func WithoutFiltering() ModelOption {
+	return func(c *modelConfig) {
+		c.modules.noFiltering = true
+	}
+}
+
+// WithModelMasking overrides provider-level masking for this model.
+func WithModelMasking(cfg MaskingConfig) ModelOption {
+	return func(c *modelConfig) {
+		if cfg.Method == "" {
+			cfg.Method = Anonymization
+		}
+
+		c.modules.masking = &cfg
+	}
+}
+
+func WithoutMasking() ModelOption {
+	return func(c *modelConfig) {
+		c.modules.noMasking = true
+	}
+}
+
+// WithModelTranslation overrides provider-level translation for this model.
+func WithModelTranslation(cfg TranslationConfig) ModelOption {
+	return func(c *modelConfig) {
+		c.modules.translation = &cfg
+	}
+}
+
+func WithoutTranslation() ModelOption {
+	return func(c *modelConfig) {
+		c.modules.noTranslation = true
+	}
+}
+
+func WithModelFallback(models ...string) ModelOption {
+	return func(c *modelConfig) {
+		c.modules.fallbackModels = models
+	}
+}
+
+func WithModelPromptCaching(ttl ...CacheTTL) ModelOption {
+	return func(c *modelConfig) {
+		c.modules.promptCaching = true
+		if len(ttl) > 0 {
+			c.modules.cacheTTL = ttl[0]
+		}
 	}
 }
 
@@ -237,6 +357,11 @@ func (p *Provider) Model(name string, opts ...ModelOption) (model.LLM, error) {
 			return nil, fmt.Errorf("model %q: %w", name, ErrDeploymentNotFound)
 		}
 
+		resolved := resolveModules(&p.cfg.modules, &mc.modules)
+		if err := validateNoModulesForFoundation(resolved); err != nil {
+			return nil, err
+		}
+
 		return &foundation.Model{
 			ModelName:     name,
 			DeploymentID:  deploymentID,
@@ -249,17 +374,30 @@ func (p *Provider) Model(name string, opts ...ModelOption) (model.LLM, error) {
 		}, nil
 
 	default:
+		resolved := resolveModules(&p.cfg.modules, &mc.modules)
+
+		if err := validateModuleConfigs(resolved); err != nil {
+			return nil, err
+		}
+
 		return &orchestration.Model{
-			ModelName:     name,
-			DeploymentID:  p.cfg.deploymentID,
-			Endpoint:      p.cfg.endpoint,
-			ResourceGroup: p.cfg.resourceGroup,
-			Headers:       p.cfg.headers,
-			Auth:          p.auth,
-			HTTPClient:    p.cfg.httpClient,
-			ExtraParams:   mc.extraParams,
-			Timeout:       p.cfg.timeout,
-			MaxRetries:    p.cfg.maxRetries,
+			ModelName:      name,
+			DeploymentID:   p.cfg.deploymentID,
+			Endpoint:       p.cfg.endpoint,
+			ResourceGroup:  p.cfg.resourceGroup,
+			Headers:        p.cfg.headers,
+			Auth:           p.auth,
+			HTTPClient:     p.cfg.httpClient,
+			ExtraParams:    mc.extraParams,
+			Timeout:        p.cfg.timeout,
+			MaxRetries:     p.cfg.maxRetries,
+			Filtering:      buildFilteringWire(resolved.Filtering),
+			Masking:        buildMaskingWire(resolved.Masking),
+			Translation:    buildTranslationWire(resolved.Translation),
+			FallbackModels: resolved.FallbackModels,
+			PromptCaching:  resolved.PromptCaching,
+			CacheTTL:       string(resolved.CacheTTL),
+			StreamOptions:  buildStreamOptionsWire(resolved.StreamOptions),
 		}, nil
 	}
 }
@@ -352,4 +490,24 @@ type deploymentResource struct {
 	ID         string `json:"id"`
 	ScenarioID string `json:"scenarioId"`
 	Status     string `json:"status"`
+}
+
+func validateNoModulesForFoundation(r resolvedModules) error {
+	if r.Filtering != nil || r.Masking != nil || r.Translation != nil || len(r.FallbackModels) > 0 || r.PromptCaching {
+		return fmt.Errorf("orchestration modules (filtering, masking, translation, fallback, caching) require orchestration mode: %w", ErrMissingConfig)
+	}
+
+	return nil
+}
+
+func validateModuleConfigs(r resolvedModules) error {
+	if r.Translation != nil && r.Translation.Input == nil && r.Translation.Output == nil {
+		return fmt.Errorf("translation config requires at least Input or Output: %w", ErrMissingConfig)
+	}
+
+	if r.Masking != nil && len(r.Masking.Entities) == 0 {
+		return fmt.Errorf("masking config requires at least one entity: %w", ErrMissingConfig)
+	}
+
+	return nil
 }

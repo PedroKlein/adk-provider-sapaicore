@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"maps"
 	"net/http"
 
 	"google.golang.org/genai"
@@ -21,26 +20,31 @@ import (
 	"github.com/PedroKlein/adk-provider-sapaicore/internal/stream"
 )
 
-// ErrInference indicates an orchestration inference request error.
 var ErrInference = errors.New("orchestration: inference")
 
-// tokenGetter retrieves a valid OAuth2 access token.
 type tokenGetter interface {
 	GetToken(ctx context.Context) (string, error)
 }
 
 // Model implements the ADK model.LLM interface for SAP AI Core orchestration mode.
 type Model struct {
-	ModelName     string
-	DeploymentID  string
-	Endpoint      string
-	ResourceGroup string
-	Headers       http.Header
-	Auth          tokenGetter
-	HTTPClient    *http.Client
-	ExtraParams   map[string]any
-	Timeout       int
-	MaxRetries    int
+	ModelName      string
+	DeploymentID   string
+	Endpoint       string
+	ResourceGroup  string
+	Headers        http.Header
+	Auth           tokenGetter
+	HTTPClient     *http.Client
+	ExtraParams    map[string]any
+	Timeout        int
+	MaxRetries     int
+	Filtering      *oai.FilteringModuleConfig
+	Masking        *oai.MaskingModuleConfig
+	Translation    *oai.TranslationModuleConfig
+	FallbackModels []string
+	PromptCaching  bool
+	CacheTTL       string
+	StreamOptions  *oai.StreamConfig
 }
 
 var _ model.LLM = (*Model)(nil)
@@ -140,114 +144,6 @@ func (m *Model) generateStream(ctx context.Context, req *model.LLMRequest) iter.
 
 		yield(agg.Finalize(), nil)
 	}
-}
-
-func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, error) {
-	params := m.extractParams(req, doStream)
-	modelParams := buildModelParams(params, doStream)
-
-	template := params.Messages
-	if len(template) == 0 {
-		defaultContent := "You are a helpful assistant."
-		template = []oai.ChatMessage{{Role: "system", Content: &defaultContent}}
-	}
-
-	orchReq := oai.OrchestrationRequest{
-		Config: oai.OrchestrationConfig{
-			Modules: oai.ModuleConfigs{
-				PromptTemplating: oai.PromptTemplatingModule{
-					Prompt: oai.PromptConfig{
-						Template:       template,
-						Tools:          params.Tools,
-						ResponseFormat: params.ResponseFormat,
-					},
-					Model: oai.ModelDef{
-						Name:       params.ModelName,
-						Version:    "latest",
-						Params:     modelParams,
-						Timeout:    params.Timeout,
-						MaxRetries: params.MaxRetries,
-					},
-				},
-			},
-		},
-	}
-
-	if doStream {
-		orchReq.Config.Stream = &oai.StreamConfig{Enabled: true}
-	}
-
-	body, err := json.Marshal(orchReq)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling orchestration request: %w", err)
-	}
-
-	return body, nil
-}
-
-func buildModelParams(params oai.RequestParams, doStream bool) map[string]any {
-	modelParams := make(map[string]any)
-
-	if params.Temperature != nil {
-		modelParams["temperature"] = *params.Temperature
-	}
-
-	if params.MaxTokens > 0 {
-		modelParams["max_tokens"] = params.MaxTokens
-	}
-
-	if params.TopP != nil {
-		modelParams["top_p"] = *params.TopP
-	}
-
-	if params.TopK != nil {
-		modelParams["top_k"] = *params.TopK
-	}
-
-	if params.Seed != nil {
-		modelParams["seed"] = *params.Seed
-	}
-
-	if len(params.Stop) > 0 {
-		modelParams["stop"] = params.Stop
-	}
-
-	if params.FrequencyPenalty != nil {
-		modelParams["frequency_penalty"] = *params.FrequencyPenalty
-	}
-
-	if params.PresencePenalty != nil {
-		modelParams["presence_penalty"] = *params.PresencePenalty
-	}
-
-	if params.ResponseLogprobs {
-		modelParams["logprobs"] = true
-	}
-
-	if params.Logprobs != nil {
-		modelParams["top_logprobs"] = *params.Logprobs
-	}
-
-	if params.ToolChoice != nil {
-		modelParams["tool_choice"] = params.ToolChoice
-	}
-
-	maps.Copy(modelParams, params.ExtraParams)
-
-	if doStream {
-		modelParams["stream_options"] = map[string]any{"include_usage": true}
-	}
-
-	return modelParams
-}
-
-func (m *Model) extractParams(req *model.LLMRequest, doStream bool) oai.RequestParams {
-	params := convert.ExtractParams(req.Config, req.Contents, req.Model, m.ModelName, m.ExtraParams)
-	params.Stream = doStream
-	params.Timeout = m.Timeout
-	params.MaxRetries = m.MaxRetries
-
-	return params
 }
 
 func (m *Model) parseResponse(resp *http.Response) (*model.LLMResponse, error) {

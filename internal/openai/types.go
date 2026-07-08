@@ -2,16 +2,23 @@
 // format used by both SAP AI Core API modes.
 package openai
 
-// ChatMessage represents a single message in the OpenAI chat format.
+import "encoding/json"
+
 type ChatMessage struct {
 	Role       string     `json:"role"`
-	Content    *string    `json:"content"`
+	Content    any        `json:"content"`
 	Refusal    string     `json:"refusal,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
-// ToolCall represents a tool invocation in a chat completion response or delta.
+// TextContentBlock is an element in a multi-block content array.
+type TextContentBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
 type ToolCall struct {
 	Index    int          `json:"index,omitempty"`
 	ID       string       `json:"id,omitempty"`
@@ -19,26 +26,23 @@ type ToolCall struct {
 	Function FunctionCall `json:"function"`
 }
 
-// FunctionCall holds the function name and serialized arguments.
 type FunctionCall struct {
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 }
 
-// ToolDef defines a tool available for the model to call.
 type ToolDef struct {
-	Type     string      `json:"type"`
-	Function FunctionDef `json:"function"`
+	Type         string        `json:"type"`
+	Function     FunctionDef   `json:"function"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
-// FunctionDef describes a callable function's name, description, and parameter schema.
 type FunctionDef struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Parameters  any    `json:"parameters,omitempty"`
 }
 
-// ChatChoice represents a single completion choice in a non-streaming response.
 type ChatChoice struct {
 	Index        int           `json:"index"`
 	Message      ChatMessage   `json:"message"`
@@ -46,12 +50,10 @@ type ChatChoice struct {
 	Logprobs     *ChatLogprobs `json:"logprobs,omitempty"`
 }
 
-// ChatLogprobs holds per-token log probability information from the response.
 type ChatLogprobs struct {
 	Content []TokenLogprob `json:"content,omitempty"`
 }
 
-// TokenLogprob represents a single token's log probability and alternatives.
 type TokenLogprob struct {
 	Token       string            `json:"token"`
 	Logprob     float64           `json:"logprob"`
@@ -59,28 +61,24 @@ type TokenLogprob struct {
 	TopLogprobs []TopTokenLogprob `json:"top_logprobs,omitempty"`
 }
 
-// TopTokenLogprob represents an alternative token with its probability.
 type TopTokenLogprob struct {
 	Token   string  `json:"token"`
 	Logprob float64 `json:"logprob"`
 	TokenID int32   `json:"token_id,omitempty"`
 }
 
-// ChatUsage reports token consumption for a request.
 type ChatUsage struct {
 	PromptTokens     int32 `json:"prompt_tokens"`
 	CompletionTokens int32 `json:"completion_tokens"`
 	TotalTokens      int32 `json:"total_tokens"`
 }
 
-// ChatError represents an API error embedded in a response body.
 type ChatError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
 	Code    string `json:"code"`
 }
 
-// ChunkChoice represents a single choice in a streaming chunk.
 type ChunkChoice struct {
 	Index        int           `json:"index"`
 	Delta        ChatDelta     `json:"delta"`
@@ -88,7 +86,6 @@ type ChunkChoice struct {
 	Logprobs     *ChatLogprobs `json:"logprobs,omitempty"`
 }
 
-// ChatDelta is the incremental content within a streaming chunk choice.
 type ChatDelta struct {
 	Role      string     `json:"role,omitempty"`
 	Content   string     `json:"content,omitempty"`
@@ -97,7 +94,6 @@ type ChatDelta struct {
 
 // --- Foundation-models mode ---
 
-// FoundationRequest is the request body for foundation-models mode (direct OpenAI format).
 type FoundationRequest struct {
 	Model            string          `json:"model"`
 	Messages         []ChatMessage   `json:"messages"`
@@ -118,12 +114,10 @@ type FoundationRequest struct {
 	ResponseFormat   *ResponseFormat `json:"response_format,omitempty"`
 }
 
-// StreamOptions configures streaming behavior.
 type StreamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
-// FoundationResponse is the non-streaming response from foundation-models mode.
 type FoundationResponse struct {
 	ID      string       `json:"id"`
 	Choices []ChatChoice `json:"choices"`
@@ -132,7 +126,6 @@ type FoundationResponse struct {
 	Error   *ChatError   `json:"error,omitempty"`
 }
 
-// FoundationChunk is a single streaming chunk from foundation-models mode.
 type FoundationChunk struct {
 	ID      string        `json:"id"`
 	Choices []ChunkChoice `json:"choices"`
@@ -142,47 +135,44 @@ type FoundationChunk struct {
 
 // --- Orchestration mode ---
 
-// OrchestrationRequest is the top-level request envelope for orchestration mode.
 type OrchestrationRequest struct {
 	Config OrchestrationConfig `json:"config"`
 }
 
-// OrchestrationConfig holds the orchestration configuration with modules and streaming.
 type OrchestrationConfig struct {
-	Stream  *StreamConfig `json:"stream,omitempty"`
-	Modules ModuleConfigs `json:"modules"`
+	Stream  *StreamConfig   `json:"stream,omitempty"`
+	Modules json.RawMessage `json:"modules"`
 }
 
-// StreamConfig enables or disables streaming in orchestration mode.
 type StreamConfig struct {
-	Enabled bool `json:"enabled"`
+	Enabled    bool     `json:"enabled"`
+	ChunkSize  int      `json:"chunk_size,omitempty"`
+	Delimiters []string `json:"delimiters,omitempty"`
 }
 
-// ModuleConfigs holds the orchestration module configurations.
 type ModuleConfigs struct {
-	PromptTemplating PromptTemplatingModule `json:"prompt_templating"`
+	PromptTemplating PromptTemplatingModule   `json:"prompt_templating"`
+	Filtering        *FilteringModuleConfig   `json:"filtering,omitempty"`
+	Masking          *MaskingModuleConfig     `json:"masking,omitempty"`
+	Translation      *TranslationModuleConfig `json:"translation,omitempty"`
 }
 
-// PromptTemplatingModule configures the prompt and model for orchestration.
 type PromptTemplatingModule struct {
 	Prompt PromptConfig `json:"prompt"`
 	Model  ModelDef     `json:"model"`
 }
 
-// PromptConfig defines the prompt template, tools, and response format.
 type PromptConfig struct {
 	Template       []ChatMessage   `json:"template"`
 	Tools          []ToolDef       `json:"tools,omitempty"`
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
-// ResponseFormat specifies the desired output format for the model.
 type ResponseFormat struct {
 	Type       string      `json:"type"`
 	JSONSchema *JSONSchema `json:"json_schema,omitempty"`
 }
 
-// JSONSchema defines a structured output schema for json_schema response format.
 type JSONSchema struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
@@ -190,7 +180,6 @@ type JSONSchema struct {
 	Strict      *bool          `json:"strict,omitempty"`
 }
 
-// ModelDef identifies the model, version, and parameters for orchestration mode.
 type ModelDef struct {
 	Name       string         `json:"name"`
 	Version    string         `json:"version,omitempty"`
@@ -199,20 +188,16 @@ type ModelDef struct {
 	MaxRetries int            `json:"max_retries,omitempty"`
 }
 
-// OrchestrationResponse is the non-streaming response from orchestration mode.
 type OrchestrationResponse struct {
 	RequestID   string              `json:"request_id"`
 	FinalResult *FoundationResponse `json:"final_result"`
 }
 
-// OrchestrationChunk is a single streaming chunk from orchestration mode.
 type OrchestrationChunk struct {
 	RequestID   string           `json:"request_id"`
 	FinalResult *FoundationChunk `json:"final_result"`
 }
 
-// RequestParams holds all generation parameters extracted from the ADK request config.
-// Used by strategy implementations to build mode-specific request bodies.
 type RequestParams struct {
 	ModelName        string
 	Messages         []ChatMessage
@@ -233,4 +218,129 @@ type RequestParams struct {
 	ExtraParams      map[string]any
 	Timeout          int
 	MaxRetries       int
+}
+
+// --- Cache control ---
+
+type CacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
+}
+
+// --- Filtering module ---
+
+type FilteringModuleConfig struct {
+	Input  *InputFilteringConfig  `json:"input,omitempty"`
+	Output *OutputFilteringConfig `json:"output,omitempty"`
+}
+
+type InputFilteringConfig struct {
+	Filters []InputFilterConfig `json:"filters"`
+}
+
+type OutputFilteringConfig struct {
+	Filters       []OutputFilterConfig `json:"filters"`
+	StreamOptions *FilteringStreamOpts `json:"stream_options,omitempty"`
+}
+
+type FilteringStreamOpts struct {
+	Overlap int `json:"overlap,omitempty"`
+}
+
+type InputFilterConfig struct {
+	Type   string `json:"type"`
+	Config any    `json:"config,omitempty"`
+}
+
+type OutputFilterConfig struct {
+	Type   string `json:"type"`
+	Config any    `json:"config,omitempty"`
+}
+
+type AzureContentSafetyFilterInput struct {
+	Hate         int  `json:"hate"`
+	SelfHarm     int  `json:"self_harm"`
+	Sexual       int  `json:"sexual"`
+	Violence     int  `json:"violence"`
+	PromptShield bool `json:"prompt_shield,omitempty"`
+}
+
+type AzureContentSafetyFilterOutput struct {
+	Hate     int `json:"hate"`
+	SelfHarm int `json:"self_harm"`
+	Sexual   int `json:"sexual"`
+	Violence int `json:"violence"`
+}
+
+type LlamaGuardFilterConfig struct {
+	ViolentCrimes         bool `json:"violent_crimes,omitempty"`
+	NonViolentCrimes      bool `json:"non_violent_crimes,omitempty"`
+	SexCrimes             bool `json:"sex_crimes,omitempty"`
+	ChildExploitation     bool `json:"child_exploitation,omitempty"`
+	Defamation            bool `json:"defamation,omitempty"`
+	SpecializedAdvice     bool `json:"specialized_advice,omitempty"`
+	Privacy               bool `json:"privacy,omitempty"`
+	IntellectualProperty  bool `json:"intellectual_property,omitempty"`
+	IndiscriminateWeapons bool `json:"indiscriminate_weapons,omitempty"`
+	Hate                  bool `json:"hate,omitempty"`
+	SelfHarm              bool `json:"self_harm,omitempty"`
+	SexualContent         bool `json:"sexual_content,omitempty"`
+	Elections             bool `json:"elections,omitempty"`
+	CodeInterpreterAbuse  bool `json:"code_interpreter_abuse,omitempty"`
+}
+
+// --- Masking module ---
+
+type MaskingModuleConfig struct {
+	Providers []MaskingProviderConfig `json:"providers"`
+}
+
+type MaskingProviderConfig struct {
+	Type               string                `json:"type"`
+	Method             string                `json:"method"`
+	Entities           []MaskingEntityConfig `json:"entities"`
+	Allowlist          []string              `json:"allowlist,omitempty"`
+	MaskGroundingInput *MaskGroundingInput   `json:"mask_grounding_input,omitempty"`
+}
+
+type MaskingEntityConfig struct {
+	Type                string             `json:"type,omitempty"`
+	Regex               string             `json:"regex,omitempty"`
+	ReplacementStrategy *DPIMethodConstant `json:"replacement_strategy,omitempty"`
+}
+
+type DPIMethodConstant struct {
+	Method string `json:"method"`
+	Value  string `json:"value"`
+}
+
+type MaskGroundingInput struct {
+	Enabled bool `json:"enabled"`
+}
+
+// --- Translation module ---
+
+type TranslationModuleConfig struct {
+	Input  *SAPDocumentTranslationInput  `json:"input,omitempty"`
+	Output *SAPDocumentTranslationOutput `json:"output,omitempty"`
+}
+
+type SAPDocumentTranslationInput struct {
+	Type   string                     `json:"type"`
+	Config TranslationInputWireConfig `json:"config"`
+}
+
+type TranslationInputWireConfig struct {
+	SourceLanguage string `json:"source_language,omitempty"`
+	TargetLanguage string `json:"target_language"`
+}
+
+type SAPDocumentTranslationOutput struct {
+	Type   string                      `json:"type"`
+	Config TranslationOutputWireConfig `json:"config"`
+}
+
+type TranslationOutputWireConfig struct {
+	SourceLanguage string `json:"source_language,omitempty"`
+	TargetLanguage string `json:"target_language"`
 }

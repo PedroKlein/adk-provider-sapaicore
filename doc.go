@@ -5,7 +5,8 @@
 //
 //   - Orchestration: a single deployment handles all models via the SAP AI Core
 //     harmonized API. Supports extended thinking, response format, tool calling,
-//     and server-side timeout/retry configuration.
+//     server-side timeout/retry, content filtering, data masking, translation,
+//     model fallback, and prompt caching.
 //
 //   - Foundation-models: per-model deployment IDs with a direct OpenAI-compatible
 //     chat completions API.
