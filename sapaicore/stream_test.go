@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/genai"
 
-	sapaicore "github.com/PedroKlein/adk-provider-sapaicore"
+	"github.com/PedroKlein/adk-provider-sapaicore/sapaicore"
 	"google.golang.org/adk/v2/model"
 )
 

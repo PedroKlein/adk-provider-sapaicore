@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	sapaicore "github.com/PedroKlein/adk-provider-sapaicore"
+	"github.com/PedroKlein/adk-provider-sapaicore/sapaicore"
 )
 
 func newTestProvider(t *testing.T, extraOpts ...sapaicore.Option) *sapaicore.Provider {

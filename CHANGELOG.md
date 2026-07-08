@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-07-08
+
+### Changed
+
+- **Breaking:** Public package moved to `sapaicore/` subdirectory. Import path is now `github.com/PedroKlein/adk-provider-sapaicore/sapaicore` (no alias required)
+- Shared HTTP execution extracted into `internal/request.Client`, removing duplicated token/auth/error handling from foundation and orchestration models
+- `internal/openai/types.go` split into domain-focused files: `chat.go`, `foundation.go`, `orchestration.go`, `modules.go`
+- `Timeout` and `MaxRetries` removed from `RequestParams` — orchestration uses model fields directly
+- Foundation mode builds request body as `map[string]any` directly when extra params are present (eliminates marshal → unmarshal → re-marshal cycle)
+- SSE parsing operates on `[]byte` instead of `string` to avoid per-line allocations during streaming
+- `buildModelParams` uses generic `setIfNotNil` helper and pre-sized map allocation
+- `content2Messages` split into `multimodalMessages` and `textAndToolMessages` helpers for clarity
+- `ExtractParams` parameters renamed from `modelName/fallbackModel` to `overrideModel/defaultModel`
+- `defaultSystemPrompt` extracted as package-level variable
+
+### Fixed
+
+- `WithDeployments` and `WithHeaders` now clone their inputs to prevent caller mutations from affecting provider state (potential data race)
+- Mode validation uses explicit switch instead of counter-incrementing pattern
+- `functionCall2ToolCall` and `functionResponse2Message` now propagate marshal errors instead of silently discarding them
+- Error response body reads bounded to 1MB via `io.LimitReader` to prevent OOM from malformed proxy responses
+- `bufio.Scanner` buffer increased to 1MB for large SSE chunks (tool calls with big JSON arguments)
+- Context cancellation checked in stream loops for responsive shutdown
+- `WithTimeout` ignores values ≤ 0; `WithMaxRetries` ignores negative values
+- Redundant `maps.Copy` of ExtraParams removed from fallback model building
+- `annotateCacheControl` constructs a new `ChatMessage` instead of mutating shared fields (aliasing fix)
+
+### Removed
+
+- `providerModeUnspecified` constant (dead code)
+- Duplicated `tokenGetter` interface definitions in foundation/orchestration packages
+
 ## [0.4.0] - 2026-07-08
 
 ### Added

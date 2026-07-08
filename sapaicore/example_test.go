@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	sapaicore "github.com/PedroKlein/adk-provider-sapaicore"
+	"github.com/PedroKlein/adk-provider-sapaicore/sapaicore"
 )
 
 func ExampleNewProvider_orchestration() {

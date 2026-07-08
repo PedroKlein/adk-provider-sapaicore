@@ -17,6 +17,8 @@ Requires Go 1.25+.
 The simplest setup uses orchestration mode with auto-discovery (the default):
 
 ```go
+import "github.com/PedroKlein/adk-provider-sapaicore/sapaicore"
+
 provider, err := sapaicore.NewProvider(
     sapaicore.WithEndpoint(os.Getenv("AI_CORE_ENDPOINT")),
     sapaicore.WithAuth(

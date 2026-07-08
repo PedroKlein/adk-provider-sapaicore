@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	sapaicore "github.com/PedroKlein/adk-provider-sapaicore"
+	"github.com/PedroKlein/adk-provider-sapaicore/sapaicore"
 )
 
 func TestTokenCache_CachesToken(t *testing.T) {
