@@ -1,5 +1,6 @@
 package sapaicore
 
+// TranslationInputConfig configures input translation before messages reach the LLM.
 type TranslationInputConfig struct {
 	// SourceLanguage (e.g. "de-DE"). Empty means auto-detect.
 	SourceLanguage string
@@ -7,6 +8,7 @@ type TranslationInputConfig struct {
 	TargetLanguage string
 }
 
+// TranslationOutputConfig configures output translation of the LLM response.
 type TranslationOutputConfig struct {
 	// SourceLanguage of the LLM output. Empty means auto-detect.
 	SourceLanguage string
@@ -22,6 +24,7 @@ type TranslationConfig struct {
 }
 
 // StreamOptions configures global streaming behavior for orchestration modules.
+// These options control how post-LLM modules (translation, filtering) process chunks.
 type StreamOptions struct {
 	// ChunkSize is the minimum characters per chunk that post-LLM modules operate on.
 	ChunkSize int

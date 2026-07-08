@@ -8,7 +8,10 @@ import (
 
 // ExtractParams maps ADK request config fields to the shared RequestParams
 // used by both foundation and orchestration mode request builders.
-func ExtractParams(req *genai.GenerateContentConfig, contents []*genai.Content, modelName, fallbackModel string, extraParams map[string]any) (oai.RequestParams, error) {
+//
+// overrideModel is the per-request model name (e.g. from ADK's BeforeModelCallback).
+// defaultModel is used when overrideModel is empty.
+func ExtractParams(req *genai.GenerateContentConfig, contents []*genai.Content, overrideModel, defaultModel string, extraParams map[string]any) (oai.RequestParams, error) {
 	var (
 		systemInstruction *genai.Content
 		tools             []*genai.Tool
@@ -45,8 +48,9 @@ func ExtractParams(req *genai.GenerateContentConfig, contents []*genai.Content, 
 		responseSchema = req.ResponseSchema
 	}
 
+	modelName := overrideModel
 	if modelName == "" {
-		modelName = fallbackModel
+		modelName = defaultModel
 	}
 
 	messages, err := Messages(systemInstruction, contents)

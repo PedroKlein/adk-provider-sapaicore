@@ -39,11 +39,13 @@ type LlamaGuardConfig struct {
 	CodeInterpreterAbuse  bool
 }
 
+// InputFilterConfig defines which content safety providers to apply on input messages.
 type InputFilterConfig struct {
 	AzureContentSafety *AzureContentSafetyConfig
 	LlamaGuard         *LlamaGuardConfig
 }
 
+// OutputFilterConfig defines which content safety providers to apply on model output.
 type OutputFilterConfig struct {
 	AzureContentSafety *AzureContentSafetyConfig
 	LlamaGuard         *LlamaGuardConfig

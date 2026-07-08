@@ -22,8 +22,7 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 
 	template := params.Messages
 	if len(template) == 0 {
-		defaultContent := "You are a helpful assistant."
-		template = []oai.ChatMessage{{Role: "system", Content: &defaultContent}}
+		template = []oai.ChatMessage{{Role: "system", Content: &defaultSystemPrompt}}
 	}
 
 	if m.PromptCaching {
@@ -172,39 +171,24 @@ func annotateToolsCacheControl(tools []oai.ToolDef, ttl string) []oai.ToolDef {
 	return result
 }
 
-func buildModelParams(params oai.RequestParams, doStream bool) map[string]any {
-	modelParams := make(map[string]any)
+var defaultSystemPrompt = "You are a helpful assistant."
 
-	if params.Temperature != nil {
-		modelParams["temperature"] = *params.Temperature
-	}
+func buildModelParams(params oai.RequestParams, doStream bool) map[string]any {
+	modelParams := make(map[string]any, 8+len(params.ExtraParams))
+
+	setIfNotNil(modelParams, "temperature", params.Temperature)
+	setIfNotNil(modelParams, "top_p", params.TopP)
+	setIfNotNil(modelParams, "top_k", params.TopK)
+	setIfNotNil(modelParams, "seed", params.Seed)
+	setIfNotNil(modelParams, "frequency_penalty", params.FrequencyPenalty)
+	setIfNotNil(modelParams, "presence_penalty", params.PresencePenalty)
 
 	if params.MaxTokens > 0 {
 		modelParams["max_tokens"] = params.MaxTokens
 	}
 
-	if params.TopP != nil {
-		modelParams["top_p"] = *params.TopP
-	}
-
-	if params.TopK != nil {
-		modelParams["top_k"] = *params.TopK
-	}
-
-	if params.Seed != nil {
-		modelParams["seed"] = *params.Seed
-	}
-
 	if len(params.Stop) > 0 {
 		modelParams["stop"] = params.Stop
-	}
-
-	if params.FrequencyPenalty != nil {
-		modelParams["frequency_penalty"] = *params.FrequencyPenalty
-	}
-
-	if params.PresencePenalty != nil {
-		modelParams["presence_penalty"] = *params.PresencePenalty
 	}
 
 	if params.ResponseLogprobs {
@@ -226,6 +210,12 @@ func buildModelParams(params oai.RequestParams, doStream bool) map[string]any {
 	}
 
 	return modelParams
+}
+
+func setIfNotNil[T any](m map[string]any, key string, ptr *T) {
+	if ptr != nil {
+		m[key] = *ptr
+	}
 }
 
 func (m *Model) extractParams(req *model.LLMRequest, doStream bool) (oai.RequestParams, error) {

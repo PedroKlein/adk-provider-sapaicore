@@ -70,7 +70,9 @@ const (
 	strategyConstant
 )
 
-// MaskingEntity is either a standard [DPIEntity] or a [CustomEntity].
+// MaskingEntity represents a single entity to mask. It is either a standard [DPIEntity]
+// (created via [StandardEntity], [FabricatedEntity], or [ConstantEntity]) or a custom
+// regex-based entity (created via [CustomMaskingEntity]).
 type MaskingEntity struct {
 	standard *DPIEntity
 	custom   *CustomEntity
