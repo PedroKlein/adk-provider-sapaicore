@@ -225,7 +225,9 @@ func TestSmoke_ToolCalling_MultiModel(t *testing.T) {
 }
 
 func TestSmoke_ADK_BeforeModelCallback(t *testing.T) {
-	// Tests that req.Model override (set by ADK's BeforeModelCallback) works.
+	// Proves req.Model override (set by ADK's BeforeModelCallback) actually
+	// routes to a different model. We create the LLM as gpt-4.1-mini but
+	// override to gemini. The response's ModelVersion should reflect gemini.
 	provider := newProvider(t)
 	ctx := withTimeout(t, 30*time.Second)
 
@@ -235,17 +237,32 @@ func TestSmoke_ADK_BeforeModelCallback(t *testing.T) {
 		t.Fatalf("Model: %v", err)
 	}
 
-	req := &model.LLMRequest{
+	// Step 1: Normal request (no override) — should come from gpt-4.1-mini.
+	reqNormal := simpleReq("Say hello")
+	respNormal := generateOne(t, ctx, llm, reqNormal)
+
+	// Step 2: Override to gemini — should come from gemini.
+	reqOverride := &model.LLMRequest{
 		Model: "gemini-2.5-flash", // Simulates BeforeModelCallback override.
 		Contents: []*genai.Content{
-			{Parts: []*genai.Part{{Text: "What model are you? Reply in one short sentence."}}, Role: "user"},
+			{Parts: []*genai.Part{{Text: "Say hello"}}, Role: "user"},
 		},
 	}
+	respOverride := generateOne(t, ctx, llm, reqOverride)
 
-	resp := generateOne(t, ctx, llm, req)
+	// ModelVersion from SAP AI Core reflects the actual model used.
+	normalModel := respNormal.ModelVersion
+	overrideModel := respOverride.ModelVersion
 
-	text := requireText(t, resp)
-	t.Logf("response=%q (should come from gemini despite model being created as gpt-4.1-mini)", text)
+	t.Logf("normal ModelVersion=%q, override ModelVersion=%q", normalModel, overrideModel)
+
+	if normalModel == overrideModel {
+		t.Errorf("model override had no effect: both returned ModelVersion=%q", normalModel)
+	}
+
+	if !strings.Contains(strings.ToLower(overrideModel), "gemini") {
+		t.Errorf("override ModelVersion=%q, expected to contain 'gemini'", overrideModel)
+	}
 }
 
 func TestSmoke_CustomHeaders(t *testing.T) {

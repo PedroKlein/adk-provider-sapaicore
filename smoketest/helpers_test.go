@@ -41,6 +41,29 @@ func newProvider(t *testing.T) *sapaicore.Provider {
 	return provider
 }
 
+func newFoundationProvider(t *testing.T) *sapaicore.Provider {
+	t.Helper()
+
+	endpoint := envOrSkip(t, "AI_CORE_ENDPOINT")
+	clientID := envOrSkip(t, "AI_CORE_CLIENT_ID")
+	clientSecret := envOrSkip(t, "AI_CORE_CLIENT_SECRET")
+	authURL := envOrSkip(t, "AI_CORE_AUTH_URL")
+	deploymentID := envOrSkip(t, "AI_CORE_FOUNDATION_DEPLOYMENT_ID")
+
+	provider, err := sapaicore.NewProvider(t.Context(),
+		sapaicore.WithEndpoint(endpoint),
+		sapaicore.WithAuth(clientID, clientSecret, authURL),
+		sapaicore.WithDeployments(map[string]string{
+			"gpt-4.1-mini": deploymentID,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("NewProvider (foundation): %v", err)
+	}
+
+	return provider
+}
+
 func envOrSkip(t *testing.T, key string) string {
 	t.Helper()
 

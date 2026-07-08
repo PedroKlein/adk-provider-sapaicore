@@ -27,24 +27,30 @@ func TestSmoke_NonStreaming(t *testing.T) {
 
 			req := &model.LLMRequest{
 				Contents: []*genai.Content{
-					{Parts: []*genai.Part{{Text: "Reply with exactly: hello"}}, Role: "user"},
-				},
-				Config: &genai.GenerateContentConfig{
-					SystemInstruction: &genai.Content{
-						Parts: []*genai.Part{{Text: "You are a concise assistant. Reply in one word."}},
-					},
+					{Parts: []*genai.Part{{Text: "What is the capital of France? Reply with just the city name."}}, Role: "user"},
 				},
 			}
 
 			resp := generateOne(t, ctx, llm, req)
 
 			text := requireText(t, resp)
-			if text == "" {
-				t.Error("empty response text")
+			if !strings.Contains(strings.ToLower(text), "paris") {
+				t.Errorf("expected 'paris' in response, got: %q", text)
 			}
 
 			if resp.UsageMetadata == nil {
 				t.Error("missing usage metadata")
+			} else {
+				if resp.UsageMetadata.PromptTokenCount == 0 {
+					t.Error("PromptTokenCount = 0")
+				}
+				if resp.UsageMetadata.CandidatesTokenCount == 0 {
+					t.Error("CandidatesTokenCount = 0")
+				}
+			}
+
+			if resp.FinishReason != genai.FinishReasonStop {
+				t.Errorf("FinishReason = %v, want Stop", resp.FinishReason)
 			}
 
 			t.Logf("response=%q model=%s tokens=%+v", text, resp.ModelVersion, resp.UsageMetadata)
@@ -87,27 +93,41 @@ func TestSmoke_Streaming(t *testing.T) {
 }
 
 func TestSmoke_ModelParams(t *testing.T) {
+	// Contrast test: proves max_tokens param is actually forwarded and respected.
+	// A long essay prompt WITHOUT max_tokens should produce >50 words.
+	// Same prompt WITH max_tokens=50 should be truncated with FinishReason=MaxTokens.
 	provider := newProvider(t)
 	ctx := withTimeout(t, 30*time.Second)
 
-	llm, err := provider.Model("gpt-4.1-mini",
+	prompt := "Write a detailed essay about the history of computing from the 1940s to today."
+
+	// Step 1: Without max_tokens limit — should be verbose.
+	llmUnlimited, _ := provider.Model("gpt-4.1-mini")
+	respLong := generateOne(t, ctx, llmUnlimited, simpleReq(prompt))
+	textLong := requireText(t, respLong)
+	wordsLong := len(strings.Fields(textLong))
+
+	// Step 2: With max_tokens=50 — should be much shorter.
+	llmLimited, err := provider.Model("gpt-4.1-mini",
 		sapaicore.WithModelParams(map[string]any{"max_tokens": 50}),
 	)
 	if err != nil {
 		t.Fatalf("Model: %v", err)
 	}
 
-	resp := generateOne(t, ctx, llm, simpleReq("Write a very long essay about the history of computing."))
+	respShort := generateOne(t, ctx, llmLimited, simpleReq(prompt))
+	textShort := requireText(t, respShort)
+	wordsShort := len(strings.Fields(textShort))
 
-	text := requireText(t, resp)
+	t.Logf("unlimited=%d words, limited=%d words", wordsLong, wordsShort)
 
-	// With max_tokens=50, response should be truncated.
-	words := strings.Fields(text)
-	if len(words) > 100 {
-		t.Errorf("expected short response (max_tokens=50), got %d words", len(words))
+	if wordsShort >= wordsLong {
+		t.Errorf("max_tokens not effective: limited=%d words >= unlimited=%d words", wordsShort, wordsLong)
 	}
 
-	t.Logf("words=%d text=%q", len(words), text)
+	if respShort.FinishReason != genai.FinishReasonMaxTokens {
+		t.Errorf("FinishReason = %v, want MaxTokens (proves truncation)", respShort.FinishReason)
+	}
 }
 
 func TestSmoke_MultiTurn(t *testing.T) {

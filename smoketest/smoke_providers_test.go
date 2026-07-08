@@ -43,11 +43,15 @@ func TestSmoke_FoundationMode_NonStreaming(t *testing.T) {
 		t.Fatalf("Model: %v", err)
 	}
 
-	resp := generateOne(t, ctx, llm, simpleReq("Reply with exactly: foundation mode works"))
+	resp := generateOne(t, ctx, llm, simpleReq("What is 2+3? Reply with just the number."))
 
 	text := requireText(t, resp)
-	if text == "" {
-		t.Error("empty response in foundation mode")
+	if !strings.Contains(text, "5") {
+		t.Errorf("expected '5' in response, got: %q", text)
+	}
+
+	if resp.FinishReason != genai.FinishReasonStop {
+		t.Errorf("FinishReason = %v, want Stop", resp.FinishReason)
 	}
 
 	t.Logf("model=%s response=%q", modelName, text)
@@ -81,15 +85,27 @@ func TestSmoke_FoundationMode_Streaming(t *testing.T) {
 		t.Fatalf("Model: %v", err)
 	}
 
-	partials, final := generateStream(t, ctx, llm, simpleReq("Count 1 to 3."))
+	partials, final := generateStream(t, ctx, llm, simpleReq("Count from 1 to 5, each on a new line."))
 
 	if len(partials) == 0 {
 		t.Error("no partial chunks in foundation streaming mode")
 	}
 
 	text := requireText(t, final)
-	if text == "" {
-		t.Error("empty final in foundation streaming")
+	if !strings.Contains(text, "3") {
+		t.Errorf("expected '3' in response, got: %q", text)
+	}
+
+	if !final.TurnComplete {
+		t.Error("final response not marked TurnComplete")
+	}
+
+	// Verify partial chunks had Partial=true.
+	for i, p := range partials {
+		if !p.Partial {
+			t.Errorf("partial[%d] not marked Partial=true", i)
+			break
+		}
 	}
 
 	t.Logf("chunks=%d response=%q", len(partials), text)

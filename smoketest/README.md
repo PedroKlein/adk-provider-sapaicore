@@ -73,6 +73,16 @@ Provider-specific features and edge cases:
 | `Anthropic1MContext` | 1M context beta accepts >200K prompt tokens (opt-in, expensive) |
 | `TimeoutAndRetries` | Server-side timeout/retry config accepted |
 | `ErrorHandling_InvalidModel` | Invalid model name produces an error (or graceful fallback) |
+| `ParamForwarding_Logprobs` | `WithModelParams` logprobs param accepted |
+| `ParamForwarding_ReasoningEffort` | `WithModelParams` reasoning_effort accepted |
+| `SeedDeterminism` | Contrast: same seed = same output, different seed = different output (orchestration) |
+| `Logprobs_InResponse` | Contrast: without logprobs → nil, with → populated with top candidates (foundation) |
+| `ToolChoice_Required` | Contrast: without tool_choice → text, with required → forced tool call (foundation) |
+| `TopK` | `top_k` param accepted by Gemini via orchestration |
+| `Logprobs_Orchestration` | Logprobs work via orchestration model.params |
+| `Logprobs_Streaming` | Streaming aggregates per-chunk logprobs into final response (foundation) |
+| `ToolChoice_Orchestration` | Contrast: same as foundation test, via orchestration model.params |
+| `Seed_Foundation` | Same seed determinism contrast test in foundation mode |
 
 ### `smoke_providers_test.go`
 
@@ -94,6 +104,7 @@ Alternative provider configurations and remaining API surface:
 Shared test utilities that keep each test body short:
 
 - `newProvider(t)` - creates a provider with auto-discovery, skips if env vars missing
+- `newFoundationProvider(t)` - creates a foundation-mode provider, skips if `AI_CORE_FOUNDATION_DEPLOYMENT_ID` missing
 - `withTimeout(t, d)` - returns a context with deadline (prevents hanging on slow APIs)
 - `generateOne(t, ctx, llm, req)` - non-streaming call, fails test on error
 - `generateStream(t, ctx, llm, req)` - streaming call, returns partials + final
