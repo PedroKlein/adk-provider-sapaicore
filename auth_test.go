@@ -35,7 +35,6 @@ func TestTokenCache_CachesToken(t *testing.T) {
 			"token_type":   "bearer",
 		})
 	}))
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if auth := r.Header.Get("Authorization"); auth != "Bearer test-token-123" {
@@ -92,7 +91,6 @@ func TestTokenCache_RefreshOnExpiry(t *testing.T) {
 			"token_type":   "bearer",
 		})
 	}))
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeOrchestrationResponse(w, "ok", "stop")

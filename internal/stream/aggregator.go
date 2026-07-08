@@ -3,6 +3,7 @@
 package stream
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -35,7 +36,7 @@ type Aggregator struct {
 
 // ProcessChunk parses a single SSE data payload and returns a partial response
 // if the chunk contains text content, or nil if it should be silently accumulated.
-func (a *Aggregator) ProcessChunk(m Mode, data string) *model.LLMResponse {
+func (a *Aggregator) ProcessChunk(m Mode, data []byte) *model.LLMResponse {
 	var (
 		choices  []oai.ChunkChoice
 		usage    *oai.ChatUsage
@@ -45,7 +46,7 @@ func (a *Aggregator) ProcessChunk(m Mode, data string) *model.LLMResponse {
 	switch m {
 	case ModeOrchestration:
 		var chunk oai.OrchestrationChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil || chunk.FinalResult == nil {
+		if err := json.Unmarshal(data, &chunk); err != nil || chunk.FinalResult == nil {
 			return nil
 		}
 
@@ -55,7 +56,7 @@ func (a *Aggregator) ProcessChunk(m Mode, data string) *model.LLMResponse {
 
 	case ModeFoundation:
 		var chunk oai.FoundationChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		if err := json.Unmarshal(data, &chunk); err != nil {
 			return nil
 		}
 
@@ -145,15 +146,21 @@ func (a *Aggregator) aggregatedLogprobs() *oai.ChatLogprobs {
 	return &oai.ChatLogprobs{Content: a.logprobs}
 }
 
+var ssePrefix = []byte("data: ")
+
 // ParseSSELine extracts the data payload from an SSE line.
-// Returns the data string and true if the line is a valid "data: " line.
-func ParseSSELine(line string) (string, bool) {
-	if !strings.HasPrefix(line, "data: ") {
-		return "", false
+// Returns the data bytes and true if the line is a valid "data: " line.
+// The returned slice shares the underlying array with the input.
+func ParseSSELine(line []byte) ([]byte, bool) {
+	if !bytes.HasPrefix(line, ssePrefix) {
+		return nil, false
 	}
 
-	return strings.TrimPrefix(line, "data: "), true
+	return line[len(ssePrefix):], true
 }
+
+// DoneMarker is the SSE termination signal.
+var DoneMarker = []byte("[DONE]")
 
 func mergeToolCallDeltas(accumulated, deltas []oai.ToolCall) []oai.ToolCall {
 	for _, delta := range deltas {

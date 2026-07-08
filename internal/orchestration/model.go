@@ -3,6 +3,7 @@ package orchestration
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -117,12 +118,12 @@ func (m *Model) generateStream(ctx context.Context, req *model.LLMRequest) iter.
 				return
 			}
 
-			data, ok := stream.ParseSSELine(scanner.Text())
+			data, ok := stream.ParseSSELine(scanner.Bytes())
 			if !ok {
 				continue
 			}
 
-			if data == "[DONE]" {
+			if bytes.Equal(data, stream.DoneMarker) {
 				break
 			}
 

@@ -285,7 +285,6 @@ func captureOrchestrationBody(t *testing.T, modelFn func(*sapaicore.Provider) (m
 	t.Helper()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	var capturedBody map[string]any
 

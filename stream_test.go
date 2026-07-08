@@ -18,7 +18,6 @@ func TestOrchestration_Streaming(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -102,7 +101,6 @@ func TestOrchestration_StreamingToolCalls(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -169,7 +167,6 @@ func TestFoundation_Streaming(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -222,7 +219,6 @@ func TestStreaming_ErrorResponse(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -255,7 +251,6 @@ func TestOrchestration_StreamIncludesUsageOption(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

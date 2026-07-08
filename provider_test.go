@@ -122,7 +122,6 @@ func TestProvider_WithOrchestration_AutoDiscovers(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	// Mock the deployments API.
 	deploymentsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +177,6 @@ func TestProvider_WithOrchestration_NoDeploymentFound(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	deploymentsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -210,7 +208,6 @@ func TestOrchestration_NonStreaming(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -326,7 +323,6 @@ func TestOrchestration_WithModelParams(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -386,7 +382,6 @@ func TestFoundation_NonStreaming(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify foundation-models URL path.
@@ -433,7 +428,6 @@ func TestFoundation_ToolCalls(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -493,7 +487,7 @@ func TestFoundation_ToolCalls(t *testing.T) {
 func newMockAuthServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "mock-token",
@@ -501,6 +495,9 @@ func newMockAuthServer(t *testing.T) *httptest.Server {
 			"token_type":   "bearer",
 		})
 	}))
+	t.Cleanup(s.Close)
+
+	return s
 }
 
 func newSimpleRequest(text string) *model.LLMRequest {
@@ -553,7 +550,6 @@ func TestOrchestration_FunctionResponseFormat(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -660,7 +656,6 @@ func TestOrchestration_RefusalHandling(t *testing.T) {
 	t.Parallel()
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -709,7 +704,6 @@ func TestOrchestration_ResponseFormat(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -786,7 +780,6 @@ func TestOrchestration_TimeoutAndRetries(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -832,7 +825,6 @@ func TestOrchestration_DefaultTimeoutAndRetries(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -876,7 +868,6 @@ func TestFoundation_WithModelParams(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -926,7 +917,6 @@ func TestFoundation_SeedAndTopK(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -978,7 +968,6 @@ func TestFoundation_Logprobs(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1077,7 +1066,6 @@ func TestFoundation_ToolChoice(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1146,7 +1134,6 @@ func TestOrchestration_SeedTopKLogprobs(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -1216,7 +1203,6 @@ func TestOrchestration_ToolChoice(t *testing.T) {
 	var capturedBody map[string]any
 
 	authServer := newMockAuthServer(t)
-	defer authServer.Close()
 
 	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

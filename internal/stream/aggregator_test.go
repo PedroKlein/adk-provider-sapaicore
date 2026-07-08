@@ -29,13 +29,13 @@ func TestParseSSELine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, ok := stream.ParseSSELine(tt.line)
+			got, ok := stream.ParseSSELine([]byte(tt.line))
 
 			if ok != tt.wantOK {
 				t.Errorf("ok = %v, want %v", ok, tt.wantOK)
 			}
 
-			if got != tt.wantStr {
+			if string(got) != tt.wantStr {
 				t.Errorf("data = %q, want %q", got, tt.wantStr)
 			}
 		})
@@ -56,7 +56,7 @@ func TestAggregator_TextStreaming(t *testing.T) {
 	var partials []string
 
 	for _, chunk := range chunks {
-		resp := agg.ProcessChunk(stream.ModeFoundation, chunk)
+		resp := agg.ProcessChunk(stream.ModeFoundation, []byte(chunk))
 		if resp != nil {
 			partials = append(partials, resp.Content.Parts[0].Text)
 		}
@@ -104,7 +104,7 @@ func TestAggregator_ToolCallStreaming(t *testing.T) {
 	var agg stream.Aggregator
 
 	for _, chunk := range chunks {
-		agg.ProcessChunk(stream.ModeFoundation, chunk)
+		agg.ProcessChunk(stream.ModeFoundation, []byte(chunk))
 	}
 
 	final := agg.Finalize()
@@ -143,7 +143,7 @@ func TestAggregator_OrchestrationMode(t *testing.T) {
 	var agg stream.Aggregator
 
 	for _, chunk := range chunks {
-		agg.ProcessChunk(stream.ModeOrchestration, chunk)
+		agg.ProcessChunk(stream.ModeOrchestration, []byte(chunk))
 	}
 
 	final := agg.Finalize()
@@ -162,12 +162,12 @@ func TestAggregator_InvalidJSON(t *testing.T) {
 
 	var agg stream.Aggregator
 
-	resp := agg.ProcessChunk(stream.ModeFoundation, "not json")
+	resp := agg.ProcessChunk(stream.ModeFoundation, []byte("not json"))
 	if resp != nil {
 		t.Error("expected nil for invalid JSON")
 	}
 
-	resp = agg.ProcessChunk(stream.ModeOrchestration, "also not json")
+	resp = agg.ProcessChunk(stream.ModeOrchestration, []byte("also not json"))
 	if resp != nil {
 		t.Error("expected nil for invalid JSON in orchestration mode")
 	}
@@ -201,7 +201,7 @@ func TestAggregator_StreamingLogprobs(t *testing.T) {
 	}
 
 	for _, chunk := range chunks {
-		agg.ProcessChunk(stream.ModeFoundation, chunk)
+		agg.ProcessChunk(stream.ModeFoundation, []byte(chunk))
 	}
 
 	final := agg.Finalize()
@@ -243,7 +243,7 @@ func TestAggregator_NoLogprobs(t *testing.T) {
 
 	// Chunk without logprobs.
 	chunk := `{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}`
-	agg.ProcessChunk(stream.ModeFoundation, chunk)
+	agg.ProcessChunk(stream.ModeFoundation, []byte(chunk))
 
 	final := agg.Finalize()
 

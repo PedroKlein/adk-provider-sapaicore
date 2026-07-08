@@ -12,7 +12,7 @@ import (
 // genai uses uppercase types ("STRING", "OBJECT") while OpenAI/SAP expects lowercase.
 // Object types automatically include "additionalProperties": false for strict schema compliance.
 func Schema(s *genai.Schema) map[string]any {
-	result := make(map[string]any)
+	result := make(map[string]any, 7)
 
 	if s.Type != "" {
 		result["type"] = strings.ToLower(string(s.Type))
