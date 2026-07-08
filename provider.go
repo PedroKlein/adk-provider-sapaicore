@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 
 	"google.golang.org/adk/v2/model"
@@ -30,7 +31,7 @@ const (
 type providerMode int
 
 const (
-	providerModeUnspecified providerMode = iota
+	_ providerMode = iota
 	providerModeOrchestration
 	providerModeFoundation
 )
@@ -84,7 +85,7 @@ func WithHTTPClient(client *http.Client) Option {
 
 func WithHeaders(headers http.Header) Option {
 	return func(c *providerConfig) {
-		c.headers = headers
+		c.headers = headers.Clone()
 	}
 }
 
@@ -107,23 +108,27 @@ func WithDeploymentID(id string) Option {
 // WithDeployments enables foundation-models mode with per-model deployment IDs.
 func WithDeployments(deployments map[string]string) Option {
 	return func(c *providerConfig) {
-		c.deployments = deployments
+		c.deployments = maps.Clone(deployments)
 	}
 }
 
 // WithTimeout sets the server-side LLM request timeout in seconds.
-// Default is 600 seconds.
+// Default is 600 seconds. Values <= 0 are ignored.
 func WithTimeout(seconds int) Option {
 	return func(c *providerConfig) {
-		c.timeout = seconds
+		if seconds > 0 {
+			c.timeout = seconds
+		}
 	}
 }
 
 // WithMaxRetries sets the server-side retry count for LLM requests.
-// Default is 2 retries.
+// Default is 2 retries. Negative values are ignored.
 func WithMaxRetries(n int) Option {
 	return func(c *providerConfig) {
-		c.maxRetries = n
+		if n >= 0 {
+			c.maxRetries = n
+		}
 	}
 }
 
@@ -418,26 +423,14 @@ func validateProviderConfig(cfg *providerConfig) error {
 	hasDeployments := len(cfg.deployments) > 0
 	hasAutoDiscover := cfg.autoDiscover
 
-	modes := 0
-	if hasDeploymentID {
-		modes++
-	}
-
-	if hasDeployments {
-		modes++
-	}
-
-	if hasAutoDiscover {
-		modes++
-	}
-
-	// Default to orchestration auto-discovery when no mode is specified.
-	if modes == 0 {
-		cfg.autoDiscover = true
-	}
-
-	if modes > 1 {
+	switch {
+	case hasDeploymentID && hasDeployments,
+		hasDeploymentID && hasAutoDiscover,
+		hasDeployments && hasAutoDiscover:
 		return fmt.Errorf("WithOrchestration, WithDeploymentID, and WithDeployments are mutually exclusive: %w", ErrMissingConfig)
+	case !hasDeploymentID && !hasDeployments && !hasAutoDiscover:
+		// Default to orchestration auto-discovery when no mode is specified.
+		cfg.autoDiscover = true
 	}
 
 	return nil

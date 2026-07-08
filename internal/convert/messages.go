@@ -3,6 +3,7 @@ package convert
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"google.golang.org/genai"
@@ -61,46 +62,72 @@ func content2Messages(content *genai.Content) ([]oai.ChatMessage, error) {
 	}
 
 	if blocks != nil {
-		var messages []oai.ChatMessage
-
-		// Collect tool calls that coexist with multimodal content.
-		var toolCalls []oai.ToolCall
-
-		for _, part := range content.Parts {
-			if part.FunctionCall != nil {
-				toolCalls = append(toolCalls, functionCall2ToolCall(part.FunctionCall))
-			}
-		}
-
-		messages = append(messages, oai.ChatMessage{
-			Role:      role,
-			Content:   blocks,
-			ToolCalls: toolCalls,
-		})
-
-		// FunctionResponse parts become separate tool messages.
-		for _, part := range content.Parts {
-			if part.FunctionResponse != nil {
-				messages = append(messages, functionResponse2Message(part.FunctionResponse))
-			}
-		}
-
-		return messages, nil
+		return multimodalMessages(role, blocks, content.Parts)
 	}
 
+	return textAndToolMessages(role, content.Parts)
+}
+
+func multimodalMessages(role string, blocks []oai.ContentBlock, parts []*genai.Part) ([]oai.ChatMessage, error) {
+	var messages []oai.ChatMessage
+
+	var toolCalls []oai.ToolCall
+
+	for _, part := range parts {
+		if part.FunctionCall != nil {
+			tc, err := functionCall2ToolCall(part.FunctionCall)
+			if err != nil {
+				return nil, err
+			}
+
+			toolCalls = append(toolCalls, tc)
+		}
+	}
+
+	messages = append(messages, oai.ChatMessage{
+		Role:      role,
+		Content:   blocks,
+		ToolCalls: toolCalls,
+	})
+
+	for _, part := range parts {
+		if part.FunctionResponse != nil {
+			msg, err := functionResponse2Message(part.FunctionResponse)
+			if err != nil {
+				return nil, err
+			}
+
+			messages = append(messages, msg)
+		}
+	}
+
+	return messages, nil
+}
+
+func textAndToolMessages(role string, parts []*genai.Part) ([]oai.ChatMessage, error) {
 	var textParts []string
 
 	var toolCalls []oai.ToolCall
 
 	var messages []oai.ChatMessage
 
-	for _, part := range content.Parts {
+	for _, part := range parts {
 		switch {
 		case part.FunctionResponse != nil:
-			messages = append(messages, functionResponse2Message(part.FunctionResponse))
+			msg, err := functionResponse2Message(part.FunctionResponse)
+			if err != nil {
+				return nil, err
+			}
+
+			messages = append(messages, msg)
 
 		case part.FunctionCall != nil:
-			toolCalls = append(toolCalls, functionCall2ToolCall(part.FunctionCall))
+			tc, err := functionCall2ToolCall(part.FunctionCall)
+			if err != nil {
+				return nil, err
+			}
+
+			toolCalls = append(toolCalls, tc)
 
 		case part.Text != "" && !part.Thought:
 			textParts = append(textParts, part.Text)
@@ -120,8 +147,11 @@ func content2Messages(content *genai.Content) ([]oai.ChatMessage, error) {
 	return messages, nil
 }
 
-func functionCall2ToolCall(fc *genai.FunctionCall) oai.ToolCall {
-	argsJSON, _ := json.Marshal(fc.Args)
+func functionCall2ToolCall(fc *genai.FunctionCall) (oai.ToolCall, error) {
+	argsJSON, err := json.Marshal(fc.Args)
+	if err != nil {
+		return oai.ToolCall{}, fmt.Errorf("marshaling function call args for %q: %w", fc.Name, err)
+	}
 
 	return oai.ToolCall{
 		ID:   fc.ID,
@@ -130,17 +160,20 @@ func functionCall2ToolCall(fc *genai.FunctionCall) oai.ToolCall {
 			Name:      fc.Name,
 			Arguments: string(argsJSON),
 		},
-	}
+	}, nil
 }
 
-func functionResponse2Message(fr *genai.FunctionResponse) oai.ChatMessage {
-	responseJSON, _ := json.Marshal(fr.Response)
+func functionResponse2Message(fr *genai.FunctionResponse) (oai.ChatMessage, error) {
+	responseJSON, err := json.Marshal(fr.Response)
+	if err != nil {
+		return oai.ChatMessage{}, fmt.Errorf("marshaling function response for %q: %w", fr.Name, err)
+	}
 
 	return oai.ChatMessage{
 		Role:       "tool",
 		Content:    strPtr(string(responseJSON)),
 		ToolCallID: fr.ID,
-	}
+	}, nil
 }
 
 // MapRole converts a genai role to an OpenAI role.

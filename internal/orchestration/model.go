@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"net/http"
 
@@ -118,8 +119,13 @@ func (m *Model) generateStream(ctx context.Context, req *model.LLMRequest) iter.
 		var agg stream.Aggregator
 
 		scanner := bufio.NewScanner(httpResp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 		for scanner.Scan() {
+			if ctx.Err() != nil {
+				return
+			}
+
 			data, ok := stream.ParseSSELine(scanner.Text())
 			if !ok {
 				continue
@@ -208,7 +214,9 @@ func (m *Model) doHTTPRequest(ctx context.Context, body []byte) (*http.Response,
 
 func (m *Model) handleErrorResponse(resp *http.Response) error {
 	var errResp oai.FoundationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != nil {
+
+	limited := io.LimitReader(resp.Body, 1<<20)
+	if err := json.NewDecoder(limited).Decode(&errResp); err == nil && errResp.Error != nil {
 		return fmt.Errorf("orchestration error %d: %s: %w", resp.StatusCode, errResp.Error.Message, ErrInference)
 	}
 
