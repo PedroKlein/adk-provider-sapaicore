@@ -40,9 +40,30 @@ type FunctionDef struct {
 
 // ChatChoice represents a single completion choice in a non-streaming response.
 type ChatChoice struct {
-	Index        int         `json:"index"`
-	Message      ChatMessage `json:"message"`
-	FinishReason string      `json:"finish_reason"`
+	Index        int           `json:"index"`
+	Message      ChatMessage   `json:"message"`
+	FinishReason string        `json:"finish_reason"`
+	Logprobs     *ChatLogprobs `json:"logprobs,omitempty"`
+}
+
+// ChatLogprobs holds per-token log probability information from the response.
+type ChatLogprobs struct {
+	Content []TokenLogprob `json:"content,omitempty"`
+}
+
+// TokenLogprob represents a single token's log probability and alternatives.
+type TokenLogprob struct {
+	Token       string            `json:"token"`
+	Logprob     float64           `json:"logprob"`
+	TokenID     int32             `json:"token_id,omitempty"`
+	TopLogprobs []TopTokenLogprob `json:"top_logprobs,omitempty"`
+}
+
+// TopTokenLogprob represents an alternative token with its probability.
+type TopTokenLogprob struct {
+	Token   string  `json:"token"`
+	Logprob float64 `json:"logprob"`
+	TokenID int32   `json:"token_id,omitempty"`
 }
 
 // ChatUsage reports token consumption for a request.
@@ -61,9 +82,10 @@ type ChatError struct {
 
 // ChunkChoice represents a single choice in a streaming chunk.
 type ChunkChoice struct {
-	Index        int       `json:"index"`
-	Delta        ChatDelta `json:"delta"`
-	FinishReason string    `json:"finish_reason,omitempty"`
+	Index        int           `json:"index"`
+	Delta        ChatDelta     `json:"delta"`
+	FinishReason string        `json:"finish_reason,omitempty"`
+	Logprobs     *ChatLogprobs `json:"logprobs,omitempty"`
 }
 
 // ChatDelta is the incremental content within a streaming chunk choice.
@@ -80,14 +102,19 @@ type FoundationRequest struct {
 	Model            string          `json:"model"`
 	Messages         []ChatMessage   `json:"messages"`
 	Tools            []ToolDef       `json:"tools,omitempty"`
+	ToolChoice       any             `json:"tool_choice,omitempty"`
 	Stream           bool            `json:"stream"`
 	StreamOptions    *StreamOptions  `json:"stream_options,omitempty"`
 	Temperature      *float32        `json:"temperature,omitempty"`
 	MaxTokens        *int32          `json:"max_tokens,omitempty"`
 	TopP             *float32        `json:"top_p,omitempty"`
+	TopK             *float32        `json:"top_k,omitempty"`
+	Seed             *int32          `json:"seed,omitempty"`
 	Stop             []string        `json:"stop,omitempty"`
 	FrequencyPenalty *float32        `json:"frequency_penalty,omitempty"`
 	PresencePenalty  *float32        `json:"presence_penalty,omitempty"`
+	Logprobs         *bool           `json:"logprobs,omitempty"`
+	TopLogprobs      *int32          `json:"top_logprobs,omitempty"`
 	ResponseFormat   *ResponseFormat `json:"response_format,omitempty"`
 }
 
@@ -190,12 +217,17 @@ type RequestParams struct {
 	ModelName        string
 	Messages         []ChatMessage
 	Tools            []ToolDef
+	ToolChoice       any
 	Temperature      *float32
 	MaxTokens        int32
 	TopP             *float32
+	TopK             *float32
+	Seed             *int32
 	Stop             []string
 	FrequencyPenalty *float32
 	PresencePenalty  *float32
+	ResponseLogprobs bool
+	Logprobs         *int32
 	ResponseFormat   *ResponseFormat
 	Stream           bool
 	ExtraParams      map[string]any

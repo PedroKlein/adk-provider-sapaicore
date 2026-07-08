@@ -147,9 +147,12 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 		Model:            params.ModelName,
 		Messages:         params.Messages,
 		Tools:            params.Tools,
+		ToolChoice:       params.ToolChoice,
 		Stream:           doStream,
 		Temperature:      params.Temperature,
 		TopP:             params.TopP,
+		TopK:             params.TopK,
+		Seed:             params.Seed,
 		Stop:             params.Stop,
 		FrequencyPenalty: params.FrequencyPenalty,
 		PresencePenalty:  params.PresencePenalty,
@@ -158,6 +161,15 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 
 	if params.MaxTokens > 0 {
 		fr.MaxTokens = &params.MaxTokens
+	}
+
+	if params.ResponseLogprobs {
+		lp := true
+		fr.Logprobs = &lp
+	}
+
+	if params.Logprobs != nil {
+		fr.TopLogprobs = params.Logprobs
 	}
 
 	if doStream {

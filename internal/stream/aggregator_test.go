@@ -188,3 +188,66 @@ func TestAggregator_EmptyFinalize(t *testing.T) {
 		t.Errorf("expected empty parts, got %d", len(final.Content.Parts))
 	}
 }
+
+func TestAggregator_StreamingLogprobs(t *testing.T) {
+	t.Parallel()
+
+	var agg stream.Aggregator
+
+	// Simulate chunks with logprobs data.
+	chunks := []string{
+		`{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"logprobs":{"content":[{"token":"Hi","logprob":-0.5,"token_id":100,"top_logprobs":[{"token":"Hi","logprob":-0.5,"token_id":100},{"token":"Hello","logprob":-1.2,"token_id":200}]}]}}]}`,
+		`{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop","logprobs":{"content":[{"token":"!","logprob":-0.1,"token_id":999}]}}]}`,
+	}
+
+	for _, chunk := range chunks {
+		agg.ProcessChunk(stream.ModeFoundation, chunk)
+	}
+
+	final := agg.Finalize()
+
+	if final.LogprobsResult == nil {
+		t.Fatal("expected LogprobsResult in streaming final response")
+	}
+
+	if len(final.LogprobsResult.ChosenCandidates) != 2 {
+		t.Fatalf("ChosenCandidates = %d, want 2", len(final.LogprobsResult.ChosenCandidates))
+	}
+
+	if final.LogprobsResult.ChosenCandidates[0].Token != "Hi" {
+		t.Errorf("token[0] = %q, want Hi", final.LogprobsResult.ChosenCandidates[0].Token)
+	}
+
+	if final.LogprobsResult.ChosenCandidates[0].TokenID != 100 {
+		t.Errorf("tokenID[0] = %d, want 100", final.LogprobsResult.ChosenCandidates[0].TokenID)
+	}
+
+	if final.LogprobsResult.ChosenCandidates[1].Token != "!" {
+		t.Errorf("token[1] = %q, want !", final.LogprobsResult.ChosenCandidates[1].Token)
+	}
+
+	// First chunk had top_logprobs, second didn't.
+	if len(final.LogprobsResult.TopCandidates) != 1 {
+		t.Fatalf("TopCandidates = %d, want 1", len(final.LogprobsResult.TopCandidates))
+	}
+
+	if len(final.LogprobsResult.TopCandidates[0].Candidates) != 2 {
+		t.Errorf("TopCandidates[0] len = %d, want 2", len(final.LogprobsResult.TopCandidates[0].Candidates))
+	}
+}
+
+func TestAggregator_NoLogprobs(t *testing.T) {
+	t.Parallel()
+
+	var agg stream.Aggregator
+
+	// Chunk without logprobs.
+	chunk := `{"id":"c1","model":"gpt-4.1","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}`
+	agg.ProcessChunk(stream.ModeFoundation, chunk)
+
+	final := agg.Finalize()
+
+	if final.LogprobsResult != nil {
+		t.Errorf("expected nil LogprobsResult when no logprobs in stream, got %+v", final.LogprobsResult)
+	}
+}

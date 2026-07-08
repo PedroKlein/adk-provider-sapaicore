@@ -144,38 +144,7 @@ func (m *Model) generateStream(ctx context.Context, req *model.LLMRequest) iter.
 
 func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, error) {
 	params := m.extractParams(req, doStream)
-
-	modelParams := make(map[string]any)
-
-	if params.Temperature != nil {
-		modelParams["temperature"] = *params.Temperature
-	}
-
-	if params.MaxTokens > 0 {
-		modelParams["max_tokens"] = params.MaxTokens
-	}
-
-	if params.TopP != nil {
-		modelParams["top_p"] = *params.TopP
-	}
-
-	if len(params.Stop) > 0 {
-		modelParams["stop"] = params.Stop
-	}
-
-	if params.FrequencyPenalty != nil {
-		modelParams["frequency_penalty"] = *params.FrequencyPenalty
-	}
-
-	if params.PresencePenalty != nil {
-		modelParams["presence_penalty"] = *params.PresencePenalty
-	}
-
-	maps.Copy(modelParams, params.ExtraParams)
-
-	if doStream {
-		modelParams["stream_options"] = map[string]any{"include_usage": true}
-	}
+	modelParams := buildModelParams(params, doStream)
 
 	template := params.Messages
 	if len(template) == 0 {
@@ -214,6 +183,62 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 	}
 
 	return body, nil
+}
+
+func buildModelParams(params oai.RequestParams, doStream bool) map[string]any {
+	modelParams := make(map[string]any)
+
+	if params.Temperature != nil {
+		modelParams["temperature"] = *params.Temperature
+	}
+
+	if params.MaxTokens > 0 {
+		modelParams["max_tokens"] = params.MaxTokens
+	}
+
+	if params.TopP != nil {
+		modelParams["top_p"] = *params.TopP
+	}
+
+	if params.TopK != nil {
+		modelParams["top_k"] = *params.TopK
+	}
+
+	if params.Seed != nil {
+		modelParams["seed"] = *params.Seed
+	}
+
+	if len(params.Stop) > 0 {
+		modelParams["stop"] = params.Stop
+	}
+
+	if params.FrequencyPenalty != nil {
+		modelParams["frequency_penalty"] = *params.FrequencyPenalty
+	}
+
+	if params.PresencePenalty != nil {
+		modelParams["presence_penalty"] = *params.PresencePenalty
+	}
+
+	if params.ResponseLogprobs {
+		modelParams["logprobs"] = true
+	}
+
+	if params.Logprobs != nil {
+		modelParams["top_logprobs"] = *params.Logprobs
+	}
+
+	if params.ToolChoice != nil {
+		modelParams["tool_choice"] = params.ToolChoice
+	}
+
+	maps.Copy(modelParams, params.ExtraParams)
+
+	if doStream {
+		modelParams["stream_options"] = map[string]any{"include_usage": true}
+	}
+
+	return modelParams
 }
 
 func (m *Model) extractParams(req *model.LLMRequest, doStream bool) oai.RequestParams {

@@ -14,10 +14,11 @@ import (
 // into an ADK LLMResponse.
 func ChoiceToResponse(choice oai.ChatChoice, usage *oai.ChatUsage, modelVersion string) *model.LLMResponse {
 	resp := &model.LLMResponse{
-		Content:       responseMessage2Content(choice.Message),
-		FinishReason:  MapFinishReason(choice.FinishReason),
-		UsageMetadata: Usage(usage),
-		ModelVersion:  modelVersion,
+		Content:        responseMessage2Content(choice.Message),
+		FinishReason:   MapFinishReason(choice.FinishReason),
+		UsageMetadata:  Usage(usage),
+		ModelVersion:   modelVersion,
+		LogprobsResult: Logprobs(choice.Logprobs),
 	}
 
 	if choice.Message.Refusal != "" {
@@ -89,5 +90,44 @@ func MapFinishReason(reason string) genai.FinishReason {
 		return genai.FinishReasonSafety
 	default:
 		return genai.FinishReasonOther
+	}
+}
+
+// Logprobs converts OpenAI logprobs response data to a genai LogprobsResult.
+// Returns nil when logprobs are not present in the response.
+func Logprobs(lp *oai.ChatLogprobs) *genai.LogprobsResult {
+	if lp == nil || len(lp.Content) == 0 {
+		return nil
+	}
+
+	chosen := make([]*genai.LogprobsResultCandidate, 0, len(lp.Content))
+	topCandidates := make([]*genai.LogprobsResultTopCandidates, 0, len(lp.Content))
+
+	for _, tok := range lp.Content {
+		chosen = append(chosen, &genai.LogprobsResultCandidate{
+			Token:          tok.Token,
+			TokenID:        tok.TokenID,
+			LogProbability: float32(tok.Logprob),
+		})
+
+		if len(tok.TopLogprobs) > 0 {
+			candidates := make([]*genai.LogprobsResultCandidate, 0, len(tok.TopLogprobs))
+			for _, alt := range tok.TopLogprobs {
+				candidates = append(candidates, &genai.LogprobsResultCandidate{
+					Token:          alt.Token,
+					TokenID:        alt.TokenID,
+					LogProbability: float32(alt.Logprob),
+				})
+			}
+
+			topCandidates = append(topCandidates, &genai.LogprobsResultTopCandidates{
+				Candidates: candidates,
+			})
+		}
+	}
+
+	return &genai.LogprobsResult{
+		ChosenCandidates: chosen,
+		TopCandidates:    topCandidates,
 	}
 }

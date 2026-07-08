@@ -919,3 +919,353 @@ func TestFoundation_WithModelParams(t *testing.T) {
 		t.Errorf("model = %v, want \"m\"", capturedBody["model"])
 	}
 }
+
+func TestFoundation_SeedAndTopK(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		writeFoundationResponse(w, "ok", "stop")
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(t.Context(),
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeployments(map[string]string{"m": "d"}),
+	)
+
+	seed := int32(42)
+	topK := float32(10)
+
+	llm, _ := provider.Model("m")
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "test"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			Seed: &seed,
+			TopK: &topK,
+		},
+	}
+
+	for _, err := range llm.GenerateContent(t.Context(), req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+	}
+
+	if capturedBody["seed"] != float64(42) {
+		t.Errorf("seed = %v, want 42", capturedBody["seed"])
+	}
+
+	if capturedBody["top_k"] != float64(10) {
+		t.Errorf("top_k = %v, want 10", capturedBody["top_k"])
+	}
+}
+
+func TestFoundation_Logprobs(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		// Return response with logprobs.
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-1",
+			"model": "gpt-4.1",
+			"choices": []map[string]any{{
+				"index":         0,
+				"message":       map[string]any{"role": "assistant", "content": "Hi"},
+				"finish_reason": "stop",
+				"logprobs": map[string]any{
+					"content": []map[string]any{
+						{
+							"token":   "Hi",
+							"logprob": -0.5,
+							"top_logprobs": []map[string]any{
+								{"token": "Hi", "logprob": -0.5},
+								{"token": "Hello", "logprob": -1.2},
+							},
+						},
+					},
+				},
+			}},
+		})
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(t.Context(),
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeployments(map[string]string{"m": "d"}),
+	)
+
+	logprobs := int32(3)
+
+	llm, _ := provider.Model("m")
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "test"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			ResponseLogprobs: true,
+			Logprobs:         &logprobs,
+		},
+	}
+
+	var result *model.LLMResponse
+
+	for resp, err := range llm.GenerateContent(t.Context(), req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+
+		result = resp
+	}
+
+	// Verify request sent logprobs fields.
+	if capturedBody["logprobs"] != true {
+		t.Errorf("request logprobs = %v, want true", capturedBody["logprobs"])
+	}
+
+	if capturedBody["top_logprobs"] != float64(3) {
+		t.Errorf("request top_logprobs = %v, want 3", capturedBody["top_logprobs"])
+	}
+
+	// Verify response has LogprobsResult populated.
+	if result.LogprobsResult == nil {
+		t.Fatal("expected LogprobsResult in response")
+	}
+
+	if len(result.LogprobsResult.ChosenCandidates) != 1 {
+		t.Fatalf("ChosenCandidates len = %d, want 1", len(result.LogprobsResult.ChosenCandidates))
+	}
+
+	if result.LogprobsResult.ChosenCandidates[0].Token != "Hi" {
+		t.Errorf("token = %q, want Hi", result.LogprobsResult.ChosenCandidates[0].Token)
+	}
+
+	if len(result.LogprobsResult.TopCandidates) != 1 {
+		t.Fatalf("TopCandidates len = %d, want 1", len(result.LogprobsResult.TopCandidates))
+	}
+
+	if len(result.LogprobsResult.TopCandidates[0].Candidates) != 2 {
+		t.Errorf("alternatives = %d, want 2", len(result.LogprobsResult.TopCandidates[0].Candidates))
+	}
+}
+
+func TestFoundation_ToolChoice(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		writeFoundationResponse(w, "ok", "stop")
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(t.Context(),
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeployments(map[string]string{"m": "d"}),
+	)
+
+	llm, _ := provider.Model("m")
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "test"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			Tools: []*genai.Tool{{
+				FunctionDeclarations: []*genai.FunctionDeclaration{{
+					Name:        "get_weather",
+					Description: "Get weather",
+				}},
+			}},
+			ToolConfig: &genai.ToolConfig{
+				FunctionCallingConfig: &genai.FunctionCallingConfig{
+					Mode:                 genai.FunctionCallingConfigModeAny,
+					AllowedFunctionNames: []string{"get_weather"},
+				},
+			},
+		},
+	}
+
+	for _, err := range llm.GenerateContent(t.Context(), req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+	}
+
+	toolChoice, ok := capturedBody["tool_choice"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool_choice = %v (%T), want map", capturedBody["tool_choice"], capturedBody["tool_choice"])
+	}
+
+	if toolChoice["type"] != "function" {
+		t.Errorf("tool_choice.type = %v, want function", toolChoice["type"])
+	}
+
+	fn, ok := toolChoice["function"].(map[string]any)
+	if !ok {
+		t.Fatal("tool_choice.function not a map")
+	}
+
+	if fn["name"] != "get_weather" {
+		t.Errorf("tool_choice.function.name = %v, want get_weather", fn["name"])
+	}
+}
+
+func TestOrchestration_SeedTopKLogprobs(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		writeOrchestrationResponse(w, "ok", "stop")
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(t.Context(),
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("d"),
+	)
+
+	seed := int32(99)
+	topK := float32(5)
+	logprobs := int32(2)
+
+	llm, _ := provider.Model("gpt-4.1")
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "test"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			Seed:             &seed,
+			TopK:             &topK,
+			ResponseLogprobs: true,
+			Logprobs:         &logprobs,
+		},
+	}
+
+	for _, err := range llm.GenerateContent(t.Context(), req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+	}
+
+	// In orchestration mode, these go into config.modules.prompt_templating.model.params.
+	cfg, _ := capturedBody["config"].(map[string]any)
+	modules, _ := cfg["modules"].(map[string]any)
+	pt, _ := modules["prompt_templating"].(map[string]any)
+	modelDef, _ := pt["model"].(map[string]any)
+	params, _ := modelDef["params"].(map[string]any)
+
+	if params["seed"] != float64(99) {
+		t.Errorf("seed = %v, want 99", params["seed"])
+	}
+
+	if params["top_k"] != float64(5) {
+		t.Errorf("top_k = %v, want 5", params["top_k"])
+	}
+
+	if params["logprobs"] != true {
+		t.Errorf("logprobs = %v, want true", params["logprobs"])
+	}
+
+	if params["top_logprobs"] != float64(2) {
+		t.Errorf("top_logprobs = %v, want 2", params["top_logprobs"])
+	}
+}
+
+func TestOrchestration_ToolChoice(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		writeOrchestrationResponse(w, "ok", "stop")
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(t.Context(),
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("d"),
+	)
+
+	llm, _ := provider.Model("gpt-4.1")
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "test"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			Tools: []*genai.Tool{{
+				FunctionDeclarations: []*genai.FunctionDeclaration{{
+					Name: "fn",
+				}},
+			}},
+			ToolConfig: &genai.ToolConfig{
+				FunctionCallingConfig: &genai.FunctionCallingConfig{
+					Mode: genai.FunctionCallingConfigModeNone,
+				},
+			},
+		},
+	}
+
+	for _, err := range llm.GenerateContent(t.Context(), req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+	}
+
+	// In orchestration mode, tool_choice goes into model.params.
+	cfg, _ := capturedBody["config"].(map[string]any)
+	modules, _ := cfg["modules"].(map[string]any)
+	pt, _ := modules["prompt_templating"].(map[string]any)
+	modelDef, _ := pt["model"].(map[string]any)
+	params, _ := modelDef["params"].(map[string]any)
+
+	if params["tool_choice"] != "none" {
+		t.Errorf("tool_choice = %v, want \"none\"", params["tool_choice"])
+	}
+}

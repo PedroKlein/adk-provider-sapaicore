@@ -206,6 +206,10 @@ type modelConfig struct {
 // WithModelParams adds extra parameters forwarded directly to the model.
 // In orchestration mode these go into model.params (e.g. thinking, reasoning_effort).
 // In foundation-models mode these are merged into the top-level request body.
+//
+// If a key conflicts with a field set via [genai.GenerateContentConfig]
+// (e.g. "seed", "top_k", "logprobs"), the WithModelParams value takes precedence.
+// This allows overriding any first-class parameter when needed.
 func WithModelParams(params map[string]any) ModelOption {
 	return func(c *modelConfig) {
 		c.extraParams = params

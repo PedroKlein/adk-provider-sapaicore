@@ -27,6 +27,7 @@ const (
 type Aggregator struct {
 	textBuf   strings.Builder
 	toolCalls []oai.ToolCall
+	logprobs  []oai.TokenLogprob
 	usage     *oai.ChatUsage
 	modelVer  string
 	finishRsn string
@@ -88,6 +89,10 @@ func (a *Aggregator) ProcessChunk(m Mode, data string) *model.LLMResponse {
 		a.toolCalls = mergeToolCallDeltas(a.toolCalls, choice.Delta.ToolCalls)
 	}
 
+	if choice.Logprobs != nil {
+		a.logprobs = append(a.logprobs, choice.Logprobs.Content...)
+	}
+
 	if choice.Delta.Content == "" {
 		return nil
 	}
@@ -124,11 +129,20 @@ func (a *Aggregator) Finalize() *model.LLMResponse {
 			Parts: parts,
 			Role:  "model",
 		},
-		FinishReason:  convert.MapFinishReason(a.finishRsn),
-		UsageMetadata: convert.Usage(a.usage),
-		ModelVersion:  a.modelVer,
-		TurnComplete:  true,
+		FinishReason:   convert.MapFinishReason(a.finishRsn),
+		UsageMetadata:  convert.Usage(a.usage),
+		ModelVersion:   a.modelVer,
+		LogprobsResult: convert.Logprobs(a.aggregatedLogprobs()),
+		TurnComplete:   true,
 	}
+}
+
+func (a *Aggregator) aggregatedLogprobs() *oai.ChatLogprobs {
+	if len(a.logprobs) == 0 {
+		return nil
+	}
+
+	return &oai.ChatLogprobs{Content: a.logprobs}
 }
 
 // ParseSSELine extracts the data payload from an SSE line.
