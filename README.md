@@ -164,6 +164,8 @@ req := &model.LLMRequest{
 
 Supported image formats: PNG, JPEG, GIF, WebP. File support varies by model (Claude: PDF; Gemini: PDF, CSV, MP3).
 
+> **Note:** SAP AI Core does not support fetching external URLs. Use `InlineData` with the file bytes. `FileData` with HTTP/HTTPS URLs will be rejected by the API with a download error.
+
 ## Content Filtering
 
 Enable input/output safety filtering with zero configuration:

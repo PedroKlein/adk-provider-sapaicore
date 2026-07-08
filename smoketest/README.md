@@ -120,7 +120,7 @@ Multi-modal input and advanced masking strategies:
 | `ImageInput_InlineData` | 50x50 red PNG recognized by GPT, Claude, and Gemini (answers "red") |
 | `ImageInput_Streaming` | Image + streaming produces partial chunks and correct final answer |
 | `FileInput_PDF` | Minimal PDF with "BANANA" read correctly by Claude and Gemini |
-| `ImageInput_FileDataURL` | HTTPS URL passed to model (skips if deployment doesn't support external URLs) |
+| `ImageInput_FoundationMode` | Image input works via foundation-models mode (standard OpenAI format) |
 | `FabricatedMasking_RedactsPII` | `FabricatedEntity` accepted by API; anonymization mode hides PII, pseudonymization unmasks |
 | `FileInput_WithMasking` | PDF + masking with `MaskFileSkip` — model still reads file content |
 

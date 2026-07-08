@@ -153,53 +153,6 @@ func TestSmoke_FileInput_PDF(t *testing.T) {
 	}
 }
 
-func TestSmoke_ImageInput_FileDataURL(t *testing.T) {
-	// Some SAP AI Core configurations may not support fetching external URLs.
-	ctx := withTimeout(t, 45*time.Second)
-	provider := newProvider(t)
-
-	llm, err := provider.Model("gpt-4.1-mini")
-	if err != nil {
-		t.Fatalf("Model: %v", err)
-	}
-
-	imageURL := "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/100px-PNG_transparency_demonstration_1.png"
-
-	req := &model.LLMRequest{
-		Contents: []*genai.Content{
-			{
-				Role: "user",
-				Parts: []*genai.Part{
-					{Text: "Briefly describe this image in one sentence."},
-					{FileData: &genai.FileData{FileURI: imageURL, MIMEType: "image/png"}},
-				},
-			},
-		},
-	}
-
-	var resp *model.LLMResponse
-
-	for r, err := range llm.GenerateContent(ctx, req, false) {
-		if err != nil {
-			if strings.Contains(err.Error(), "400") {
-				t.Skipf("FileData URL not supported by this deployment: %v", err)
-			}
-
-			t.Fatalf("GenerateContent: %v", err)
-		}
-
-		resp = r
-	}
-
-	text := requireText(t, resp)
-
-	if len(text) < 10 {
-		t.Errorf("expected meaningful description (>10 chars), got: %q", text)
-	}
-
-	t.Logf("FileData URL response=%q", text)
-}
-
 func TestSmoke_ImageInput_FoundationMode(t *testing.T) {
 	ctx := withTimeout(t, 45*time.Second)
 	provider := newFoundationProvider(t)
