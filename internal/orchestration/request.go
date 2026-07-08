@@ -95,7 +95,6 @@ func (m *Model) marshalModules(primary oai.ModuleConfigs, params oai.RequestPara
 
 	for _, fallbackModel := range m.FallbackModels {
 		fallbackParams := buildModelParams(params, doStream)
-		maps.Copy(fallbackParams, m.ExtraParams)
 
 		fb := oai.ModuleConfigs{
 			PromptTemplating: oai.PromptTemplatingModule{
@@ -141,11 +140,17 @@ func annotateCacheControl(messages []oai.ChatMessage, ttl string) []oai.ChatMess
 				text = c
 			}
 
-			result[i].Content = []oai.TextContentBlock{{
-				Type:         "text",
-				Text:         text,
-				CacheControl: &oai.CacheControl{Type: "ephemeral", TTL: ttl},
-			}}
+			// Construct a new message to avoid aliasing the original.
+			result[i] = oai.ChatMessage{
+				Role: msg.Role,
+				Content: []oai.TextContentBlock{{
+					Type:         "text",
+					Text:         text,
+					CacheControl: &oai.CacheControl{Type: "ephemeral", TTL: ttl},
+				}},
+				ToolCalls:  msg.ToolCalls,
+				ToolCallID: msg.ToolCallID,
+			}
 
 			break
 		}

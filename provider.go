@@ -13,6 +13,7 @@ import (
 	"github.com/PedroKlein/adk-provider-sapaicore/internal/auth"
 	"github.com/PedroKlein/adk-provider-sapaicore/internal/foundation"
 	"github.com/PedroKlein/adk-provider-sapaicore/internal/orchestration"
+	"github.com/PedroKlein/adk-provider-sapaicore/internal/request"
 )
 
 var (
@@ -368,14 +369,10 @@ func (p *Provider) Model(name string, opts ...ModelOption) (model.LLM, error) {
 		}
 
 		return &foundation.Model{
-			ModelName:     name,
-			DeploymentID:  deploymentID,
-			Endpoint:      p.cfg.endpoint,
-			ResourceGroup: p.cfg.resourceGroup,
-			Headers:       p.cfg.headers,
-			Auth:          p.auth,
-			HTTPClient:    p.cfg.httpClient,
-			ExtraParams:   mc.extraParams,
+			ModelName:   name,
+			ExtraParams: mc.extraParams,
+			URL:         fmt.Sprintf("%s/v2/inference/deployments/%s/v1/chat/completions", p.cfg.endpoint, deploymentID),
+			Client:      p.newClient(),
 		}, nil
 
 	default:
@@ -387,12 +384,6 @@ func (p *Provider) Model(name string, opts ...ModelOption) (model.LLM, error) {
 
 		return &orchestration.Model{
 			ModelName:      name,
-			DeploymentID:   p.cfg.deploymentID,
-			Endpoint:       p.cfg.endpoint,
-			ResourceGroup:  p.cfg.resourceGroup,
-			Headers:        p.cfg.headers,
-			Auth:           p.auth,
-			HTTPClient:     p.cfg.httpClient,
 			ExtraParams:    mc.extraParams,
 			Timeout:        p.cfg.timeout,
 			MaxRetries:     p.cfg.maxRetries,
@@ -403,7 +394,19 @@ func (p *Provider) Model(name string, opts ...ModelOption) (model.LLM, error) {
 			PromptCaching:  resolved.PromptCaching,
 			CacheTTL:       string(resolved.CacheTTL),
 			StreamOptions:  buildStreamOptionsWire(resolved.StreamOptions),
+			URL:            fmt.Sprintf("%s/v2/inference/deployments/%s/v2/completion", p.cfg.endpoint, p.cfg.deploymentID),
+			Client:         p.newClient(),
 		}, nil
+	}
+}
+
+func (p *Provider) newClient() *request.Client {
+	return &request.Client{
+		Endpoint:      p.cfg.endpoint,
+		ResourceGroup: p.cfg.resourceGroup,
+		Headers:       p.cfg.headers,
+		HTTPClient:    p.cfg.httpClient,
+		Auth:          p.auth,
 	}
 }
 

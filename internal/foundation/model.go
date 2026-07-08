@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"maps"
 	"net/http"
@@ -25,21 +24,12 @@ import (
 // ErrInference indicates an inference request error.
 var ErrInference = errors.New("foundation: inference")
 
-// tokenGetter retrieves a valid OAuth2 access token.
-type tokenGetter interface {
-	GetToken(ctx context.Context) (string, error)
-}
-
 // Model implements the ADK model.LLM interface for SAP AI Core foundation-models mode.
 type Model struct {
-	ModelName     string
-	DeploymentID  string
-	Endpoint      string
-	ResourceGroup string
-	Headers       http.Header
-	Auth          tokenGetter
-	HTTPClient    *http.Client
-	ExtraParams   map[string]any
+	ModelName   string
+	ExtraParams map[string]any
+	URL         string
+	Client      *request.Client
 }
 
 var _ model.LLM = (*Model)(nil)
@@ -251,27 +241,8 @@ func (m *Model) parseResponse(resp *http.Response) (*model.LLMResponse, error) {
 	return convert.ChoiceToResponse(fResp.Choices[0], fResp.Usage, fResp.Model), nil
 }
 
-func (m *Model) requestURL() string {
-	return fmt.Sprintf("%s/v2/inference/deployments/%s/v1/chat/completions", m.Endpoint, m.DeploymentID)
-}
-
-func (m *Model) reqConfig() *request.Config {
-	return &request.Config{
-		Endpoint:      m.Endpoint,
-		DeploymentID:  m.DeploymentID,
-		ResourceGroup: m.ResourceGroup,
-		Headers:       m.Headers,
-		HTTPClient:    m.HTTPClient,
-	}
-}
-
 func (m *Model) doHTTPRequest(ctx context.Context, body []byte) (*http.Response, error) {
-	token, err := m.Auth.GetToken(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting auth token: %w", err)
-	}
-
-	resp, err := request.Do(ctx, m.reqConfig(), m.requestURL(), body, token)
+	resp, err := m.Client.Execute(ctx, m.URL, body)
 	if err != nil {
 		return nil, fmt.Errorf("inference request: %w", err)
 	}
@@ -280,12 +251,6 @@ func (m *Model) doHTTPRequest(ctx context.Context, body []byte) (*http.Response,
 }
 
 func (m *Model) handleErrorResponse(resp *http.Response) error {
-	var errResp oai.FoundationResponse
-
-	limited := io.LimitReader(resp.Body, 1<<20)
-	if err := json.NewDecoder(limited).Decode(&errResp); err == nil && errResp.Error != nil {
-		return fmt.Errorf("API error %d: %s: %w", resp.StatusCode, errResp.Error.Message, ErrInference)
-	}
-
-	return fmt.Errorf("API returned status %d: %w", resp.StatusCode, ErrInference)
+	//nolint:wrapcheck // request is an internal package; error is already wrapped with sentinel
+	return m.Client.HandleError(resp, ErrInference)
 }
