@@ -6,6 +6,8 @@ import (
 	oai "github.com/PedroKlein/adk-provider-sapaicore/internal/openai"
 )
 
+const toolTypeFunction = "function"
+
 // Tools converts genai Tool declarations into OpenAI-compatible tool definitions.
 func Tools(tools []*genai.Tool) []oai.ToolDef {
 	var defs []oai.ToolDef
@@ -46,7 +48,7 @@ func ToolChoice(cfg *genai.ToolConfig) any {
 		names := fcc.AllowedFunctionNames
 		if len(names) == 1 {
 			return map[string]any{
-				"type":     "function",
+				"type":     toolTypeFunction,
 				"function": map[string]any{"name": names[0]},
 			}
 		}
@@ -69,7 +71,7 @@ func functionDecl2ToolDef(decl *genai.FunctionDeclaration) oai.ToolDef {
 	}
 
 	return oai.ToolDef{
-		Type: "function",
+		Type: toolTypeFunction,
 		Function: oai.FunctionDef{
 			Name:        decl.Name,
 			Description: decl.Description,

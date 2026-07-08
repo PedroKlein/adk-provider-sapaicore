@@ -3,6 +3,7 @@ _.file = ".env"
 
 [tools]
 go = "1.25"
+golangci-lint = "2.12.2"
 
 [tasks.build]
 description = "Build all packages"
@@ -15,6 +16,10 @@ run = "go test -race ./..."
 [tasks.lint]
 description = "Run golangci-lint"
 run = "golangci-lint run ./..."
+
+[tasks.fix]
+description = "Auto-fix lint issues (wsl whitespace, gofmt, etc.)"
+run = "golangci-lint run --fix ./..."
 
 [tasks.vet]
 description = "Run go vet"

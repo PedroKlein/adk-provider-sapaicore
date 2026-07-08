@@ -86,7 +86,7 @@ func functionCall2ToolCall(fc *genai.FunctionCall) oai.ToolCall {
 
 	return oai.ToolCall{
 		ID:   fc.ID,
-		Type: "function",
+		Type: toolTypeFunction,
 		Function: oai.FunctionCall{
 			Name:      fc.Name,
 			Arguments: string(argsJSON),
