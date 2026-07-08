@@ -145,7 +145,11 @@ type Provider struct {
 // If no mode is specified, orchestration auto-discovery is used by default.
 // NewProvider makes an HTTP call to discover the orchestration deployment ID
 // when auto-discovery is active.
-func NewProvider(opts ...Option) (*Provider, error) {
+//
+// ctx is used for any HTTP calls made during provider initialization
+// (e.g. orchestration deployment discovery). It does not affect subsequent
+// Model() or GenerateContent() calls.
+func NewProvider(ctx context.Context, opts ...Option) (*Provider, error) {
 	cfg := providerConfig{
 		resourceGroup: defaultResourceGroup,
 		timeout:       defaultTimeout,
@@ -172,7 +176,7 @@ func NewProvider(opts ...Option) (*Provider, error) {
 	})
 
 	if cfg.autoDiscover {
-		deploymentID, err := discoverOrchestrationDeployment(tokenCache, &cfg)
+		deploymentID, err := discoverOrchestrationDeployment(ctx, tokenCache, &cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -297,9 +301,7 @@ func validateProviderConfig(cfg *providerConfig) error {
 	return nil
 }
 
-func discoverOrchestrationDeployment(tokenCache *auth.TokenCache, cfg *providerConfig) (string, error) {
-	ctx := context.Background()
-
+func discoverOrchestrationDeployment(ctx context.Context, tokenCache *auth.TokenCache, cfg *providerConfig) (string, error) {
 	token, err := tokenCache.GetToken(ctx)
 	if err != nil {
 		return "", fmt.Errorf("getting token for discovery: %w", ErrDiscovery)

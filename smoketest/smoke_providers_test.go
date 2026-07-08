@@ -27,7 +27,7 @@ func TestSmoke_FoundationMode_NonStreaming(t *testing.T) {
 		modelName = "gpt-4.1-mini"
 	}
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(endpoint),
 		sapaicore.WithAuth(clientID, clientSecret, authURL),
 		sapaicore.WithDeployments(map[string]string{modelName: deploymentID}),
@@ -65,7 +65,7 @@ func TestSmoke_FoundationMode_Streaming(t *testing.T) {
 		modelName = "gpt-4.1-mini"
 	}
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(endpoint),
 		sapaicore.WithAuth(clientID, clientSecret, authURL),
 		sapaicore.WithDeployments(map[string]string{modelName: deploymentID}),
@@ -107,7 +107,7 @@ func TestSmoke_FoundationMode_ToolCalling(t *testing.T) {
 		modelName = "gpt-4.1-mini"
 	}
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(endpoint),
 		sapaicore.WithAuth(clientID, clientSecret, authURL),
 		sapaicore.WithDeployments(map[string]string{modelName: deploymentID}),
@@ -161,7 +161,7 @@ func TestSmoke_WithDeploymentID(t *testing.T) {
 	authURL := envOrSkip(t, "AI_CORE_AUTH_URL")
 	deploymentID := envOrSkip(t, "AI_CORE_DEPLOYMENT_ID")
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(endpoint),
 		sapaicore.WithAuth(clientID, clientSecret, authURL),
 		sapaicore.WithDeploymentID(deploymentID),
@@ -194,7 +194,7 @@ func TestSmoke_WithResourceGroup(t *testing.T) {
 	authURL := envOrSkip(t, "AI_CORE_AUTH_URL")
 	resourceGroup := envOrSkip(t, "AI_CORE_RESOURCE_GROUP")
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(endpoint),
 		sapaicore.WithAuth(clientID, clientSecret, authURL),
 		sapaicore.WithOrchestration(),
@@ -231,7 +231,7 @@ func TestSmoke_WithHTTPClient(t *testing.T) {
 		Timeout: 45 * time.Second,
 	}
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(endpoint),
 		sapaicore.WithAuth(clientID, clientSecret, authURL),
 		sapaicore.WithOrchestration(),

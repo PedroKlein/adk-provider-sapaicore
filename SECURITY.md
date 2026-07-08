@@ -6,7 +6,7 @@ This library handles OAuth2 credentials and authentication tokens. If you discov
 
 **Do NOT open a public issue for security vulnerabilities.**
 
-Instead, please email: [pedro@kleinweb.dev](mailto:pedro@kleinweb.dev)
+Instead, please email: [pedroklein1@hotmail.com](mailto:pedroklein1@hotmail.com) or [pedro.klein@sap.com](mailto:pedro.klein@sap.com)
 
 Include:
 - Description of the vulnerability

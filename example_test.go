@@ -1,6 +1,7 @@
 package sapaicore_test
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -8,7 +9,7 @@ import (
 )
 
 func ExampleNewProvider_orchestration() {
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(context.Background(),
 		sapaicore.WithEndpoint("https://api.ai.prod.us-east-1.aws.ml.hana.ondemand.com"),
 		sapaicore.WithAuth("client-id", "client-secret", "https://auth.example.com/oauth/token"),
 		sapaicore.WithDeploymentID("d1234abc"), // or use WithOrchestration() for auto-discovery
@@ -27,7 +28,7 @@ func ExampleNewProvider_orchestration() {
 }
 
 func ExampleNewProvider_foundationModels() {
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(context.Background(),
 		sapaicore.WithEndpoint("https://api.ai.prod.us-east-1.aws.ml.hana.ondemand.com"),
 		sapaicore.WithAuth("client-id", "client-secret", "https://auth.example.com/oauth/token"),
 		sapaicore.WithDeployments(map[string]string{
@@ -49,7 +50,7 @@ func ExampleNewProvider_foundationModels() {
 }
 
 func ExampleWithModelParams() {
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(context.Background(),
 		sapaicore.WithEndpoint("https://api.ai.prod.us-east-1.aws.ml.hana.ondemand.com"),
 		sapaicore.WithAuth("client-id", "client-secret", "https://auth.example.com/oauth/token"),
 		sapaicore.WithDeploymentID("d1234abc"),
@@ -71,4 +72,24 @@ func ExampleWithModelParams() {
 
 	fmt.Println(llm.Name())
 	// Output: anthropic--claude-4.5-sonnet
+}
+
+func ExampleWithResourceGroup() {
+	provider, err := sapaicore.NewProvider(context.Background(),
+		sapaicore.WithEndpoint("https://api.ai.prod.us-east-1.aws.ml.hana.ondemand.com"),
+		sapaicore.WithAuth("client-id", "client-secret", "https://auth.example.com/oauth/token"),
+		sapaicore.WithDeploymentID("d1234abc"),
+		sapaicore.WithResourceGroup("my-team-rg"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	llm, err := provider.Model("gpt-4.1")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(llm.Name())
+	// Output: gpt-4.1
 }

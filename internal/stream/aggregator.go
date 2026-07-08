@@ -52,7 +52,7 @@ func (a *Aggregator) ProcessChunk(m Mode, data string) *model.LLMResponse {
 		usage = chunk.FinalResult.Usage
 		modelVer = chunk.FinalResult.Model
 
-	default:
+	case ModeFoundation:
 		var chunk oai.FoundationChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return nil
@@ -61,6 +61,9 @@ func (a *Aggregator) ProcessChunk(m Mode, data string) *model.LLMResponse {
 		choices = chunk.Choices
 		usage = chunk.Usage
 		modelVer = chunk.Model
+
+	default:
+		return nil
 	}
 
 	if modelVer != "" {

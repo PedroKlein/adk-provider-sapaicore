@@ -29,7 +29,7 @@ func newProvider(t *testing.T) *sapaicore.Provider {
 	clientSecret := envOrSkip(t, "AI_CORE_CLIENT_SECRET")
 	authURL := envOrSkip(t, "AI_CORE_AUTH_URL")
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(endpoint),
 		sapaicore.WithAuth(clientID, clientSecret, authURL),
 		sapaicore.WithOrchestration(),

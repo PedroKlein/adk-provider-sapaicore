@@ -24,8 +24,10 @@ import (
 // ErrInference indicates an orchestration inference request error.
 var ErrInference = errors.New("orchestration: inference")
 
-// TokenGetter retrieves a valid OAuth2 access token.
-type TokenGetter = request.TokenGetter
+// tokenGetter retrieves a valid OAuth2 access token.
+type tokenGetter interface {
+	GetToken(ctx context.Context) (string, error)
+}
 
 // Model implements the ADK model.LLM interface for SAP AI Core orchestration mode.
 type Model struct {
@@ -34,7 +36,7 @@ type Model struct {
 	Endpoint      string
 	ResourceGroup string
 	Headers       http.Header
-	Auth          TokenGetter
+	Auth          tokenGetter
 	HTTPClient    *http.Client
 	ExtraParams   map[string]any
 	Timeout       int
@@ -215,53 +217,12 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 }
 
 func (m *Model) extractParams(req *model.LLMRequest, doStream bool) oai.RequestParams {
-	var (
-		systemInstruction *genai.Content
-		tools             []*genai.Tool
-		temperature       *float32
-		maxTokens         int32
-		topP              *float32
-		stop              []string
-		frequencyPenalty  *float32
-		presencePenalty   *float32
-		responseMIME      string
-		responseSchema    *genai.Schema
-	)
+	params := convert.ExtractParams(req.Config, req.Contents, req.Model, m.ModelName, m.ExtraParams)
+	params.Stream = doStream
+	params.Timeout = m.Timeout
+	params.MaxRetries = m.MaxRetries
 
-	if req.Config != nil {
-		systemInstruction = req.Config.SystemInstruction
-		tools = req.Config.Tools
-		temperature = req.Config.Temperature
-		maxTokens = req.Config.MaxOutputTokens
-		topP = req.Config.TopP
-		stop = req.Config.StopSequences
-		frequencyPenalty = req.Config.FrequencyPenalty
-		presencePenalty = req.Config.PresencePenalty
-		responseMIME = req.Config.ResponseMIMEType
-		responseSchema = req.Config.ResponseSchema
-	}
-
-	modelName := req.Model
-	if modelName == "" {
-		modelName = m.ModelName
-	}
-
-	return oai.RequestParams{
-		ModelName:        modelName,
-		Messages:         convert.Messages(systemInstruction, req.Contents),
-		Tools:            convert.Tools(tools),
-		Temperature:      temperature,
-		MaxTokens:        maxTokens,
-		TopP:             topP,
-		Stop:             stop,
-		FrequencyPenalty: frequencyPenalty,
-		PresencePenalty:  presencePenalty,
-		ResponseFormat:   convert.ResponseFormat(responseMIME, responseSchema),
-		Stream:           doStream,
-		ExtraParams:      m.ExtraParams,
-		Timeout:          m.Timeout,
-		MaxRetries:       m.MaxRetries,
-	}
+	return params
 }
 
 func (m *Model) parseResponse(resp *http.Response) (*model.LLMResponse, error) {
@@ -306,13 +267,17 @@ func (m *Model) reqConfig() *request.Config {
 		DeploymentID:  m.DeploymentID,
 		ResourceGroup: m.ResourceGroup,
 		Headers:       m.Headers,
-		Auth:          m.Auth,
 		HTTPClient:    m.HTTPClient,
 	}
 }
 
 func (m *Model) doHTTPRequest(ctx context.Context, body []byte) (*http.Response, error) {
-	resp, err := request.Do(ctx, m.reqConfig(), m.requestURL(), body)
+	token, err := m.Auth.GetToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting auth token: %w", err)
+	}
+
+	resp, err := request.Do(ctx, m.reqConfig(), m.requestURL(), body, token)
 	if err != nil {
 		return nil, fmt.Errorf("inference request: %w", err)
 	}
@@ -321,14 +286,8 @@ func (m *Model) doHTTPRequest(ctx context.Context, body []byte) (*http.Response,
 }
 
 func (m *Model) handleErrorResponse(resp *http.Response) error {
-	var errResp struct {
-		Error struct {
-			Message string `json:"message"`
-			Code    int    `json:"code"`
-		} `json:"error"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error.Message != "" {
+	var errResp oai.FoundationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil && errResp.Error != nil {
 		return fmt.Errorf("orchestration error %d: %s: %w", resp.StatusCode, errResp.Error.Message, ErrInference)
 	}
 

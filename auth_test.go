@@ -46,7 +46,7 @@ func TestTokenCache_CachesToken(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("test-client-id", "test-client-secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("orch-deploy"),
@@ -99,7 +99,7 @@ func TestTokenCache_RefreshOnExpiry(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),

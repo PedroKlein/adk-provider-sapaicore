@@ -4,11 +4,20 @@ Contributions are welcome! Here's how to get started.
 
 ## Development
 
+This project uses [mise](https://mise.jdx.dev/) for toolchain management. Run `mise install` to get the correct Go and tooling versions.
+
 ```bash
-go build ./...
-go vet ./...
-golangci-lint run ./...
-go test -race ./...
+mise install
+mise run check  # build + vet + lint + test
+```
+
+Or run individual tasks:
+
+```bash
+mise run build
+mise run lint
+mise run test
+mise run smoke  # integration tests (requires SAP AI Core credentials)
 ```
 
 ## Submitting changes

@@ -8,29 +8,18 @@ import (
 	"net/http"
 )
 
-// TokenGetter retrieves a valid OAuth2 access token.
-type TokenGetter interface {
-	GetToken(ctx context.Context) (string, error)
-}
-
 // Config holds the shared parameters for executing inference HTTP requests.
 type Config struct {
 	Endpoint      string
 	DeploymentID  string
 	ResourceGroup string
 	Headers       http.Header
-	Auth          TokenGetter
 	HTTPClient    *http.Client
 }
 
-// Do executes an HTTP POST to the given URL path with the provided body.
+// Do executes an HTTP POST to the given URL with the provided body and bearer token.
 // It attaches the authorization header, resource group, and custom headers.
-func Do(ctx context.Context, cfg *Config, url string, body []byte) (*http.Response, error) {
-	token, err := cfg.Auth.GetToken(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting auth token: %w", err)
-	}
-
+func Do(ctx context.Context, cfg *Config, url string, body []byte, token string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)

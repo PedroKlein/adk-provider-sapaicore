@@ -40,7 +40,7 @@ func TestOrchestration_Streaming(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),
@@ -122,7 +122,7 @@ func TestOrchestration_StreamingToolCalls(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),
@@ -189,7 +189,7 @@ func TestFoundation_Streaming(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeployments(map[string]string{"m": "d"}),
@@ -230,7 +230,7 @@ func TestStreaming_ErrorResponse(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),
@@ -268,7 +268,7 @@ func TestOrchestration_StreamIncludesUsageOption(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),

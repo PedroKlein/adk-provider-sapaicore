@@ -61,7 +61,7 @@ func TestNewProvider_ValidatesConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := sapaicore.NewProvider(tt.opts...)
+			_, err := sapaicore.NewProvider(t.Context(), tt.opts...)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -76,7 +76,7 @@ func TestNewProvider_ValidatesConfig(t *testing.T) {
 func TestProvider_Model_NotFound_FoundationMode(t *testing.T) {
 	t.Parallel()
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint("https://api.example.com"),
 		sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
 		sapaicore.WithDeployments(map[string]string{"gpt-4.1": "deploy-1"}),
@@ -98,7 +98,7 @@ func TestProvider_Model_NotFound_FoundationMode(t *testing.T) {
 func TestProvider_Model_AnyName_OrchestrationMode(t *testing.T) {
 	t.Parallel()
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint("https://api.example.com"),
 		sapaicore.WithAuth("id", "secret", "https://auth.example.com/token"),
 		sapaicore.WithDeploymentID("orch-deploy"),
@@ -154,7 +154,7 @@ func TestProvider_WithOrchestration_AutoDiscovers(t *testing.T) {
 	}))
 	defer deploymentsServer.Close()
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(deploymentsServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithOrchestration(),
@@ -188,7 +188,7 @@ func TestProvider_WithOrchestration_NoDeploymentFound(t *testing.T) {
 	}))
 	defer deploymentsServer.Close()
 
-	_, err := sapaicore.NewProvider(
+	_, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(deploymentsServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithOrchestration(),
@@ -233,7 +233,7 @@ func TestOrchestration_NonStreaming(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, err := sapaicore.NewProvider(
+	provider, err := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("orch-123"),
@@ -336,7 +336,7 @@ func TestOrchestration_WithModelParams(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),
@@ -401,7 +401,7 @@ func TestFoundation_NonStreaming(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeployments(map[string]string{"gpt-4.1": "deploy-xyz"}),
@@ -460,7 +460,7 @@ func TestFoundation_ToolCalls(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeployments(map[string]string{"m": "d"}),
@@ -563,7 +563,7 @@ func TestOrchestration_FunctionResponseFormat(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("orch-123"),
@@ -680,7 +680,7 @@ func TestOrchestration_RefusalHandling(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),
@@ -719,7 +719,7 @@ func TestOrchestration_ResponseFormat(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),
@@ -796,7 +796,7 @@ func TestOrchestration_TimeoutAndRetries(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),
@@ -842,7 +842,7 @@ func TestOrchestration_DefaultTimeoutAndRetries(t *testing.T) {
 	}))
 	defer inferenceServer.Close()
 
-	provider, _ := sapaicore.NewProvider(
+	provider, _ := sapaicore.NewProvider(t.Context(),
 		sapaicore.WithEndpoint(inferenceServer.URL),
 		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
 		sapaicore.WithDeploymentID("d"),
@@ -867,5 +867,55 @@ func TestOrchestration_DefaultTimeoutAndRetries(t *testing.T) {
 
 	if modelCfg["max_retries"] != float64(2) {
 		t.Errorf("max_retries = %v, want 2 (default)", modelCfg["max_retries"])
+	}
+}
+
+func TestFoundation_WithModelParams(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+	defer authServer.Close()
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		writeFoundationResponse(w, "ok", "stop")
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(t.Context(),
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeployments(map[string]string{"m": "d"}),
+	)
+
+	llm, _ := provider.Model("m",
+		sapaicore.WithModelParams(map[string]any{
+			"reasoning_effort": "high",
+			"logprobs":         true,
+		}),
+	)
+
+	for _, err := range llm.GenerateContent(t.Context(), newSimpleRequest("test"), false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+	}
+
+	// Extra params must appear at the top level of the foundation request body.
+	if capturedBody["reasoning_effort"] != "high" {
+		t.Errorf("reasoning_effort = %v, want \"high\"", capturedBody["reasoning_effort"])
+	}
+
+	if capturedBody["logprobs"] != true {
+		t.Errorf("logprobs = %v, want true", capturedBody["logprobs"])
+	}
+
+	// Standard fields should still be present.
+	if capturedBody["model"] != "m" {
+		t.Errorf("model = %v, want \"m\"", capturedBody["model"])
 	}
 }
