@@ -66,8 +66,13 @@ func ToolChoice(cfg *genai.ToolConfig) any {
 func functionDecl2ToolDef(decl *genai.FunctionDeclaration) oai.ToolDef {
 	var params any
 
-	if decl.Parameters != nil {
+	switch {
+	case decl.Parameters != nil:
 		params = Schema(decl.Parameters)
+	case decl.ParametersJsonSchema != nil:
+		// ADK v2 functiontool sets ParametersJsonSchema (a *jsonschema.Schema)
+		// instead of Parameters. It's already JSON-serializable — pass through directly.
+		params = decl.ParametersJsonSchema
 	}
 
 	return oai.ToolDef{

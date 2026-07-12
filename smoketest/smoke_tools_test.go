@@ -10,7 +10,9 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/PedroKlein/adk-provider-sapaicore/sapaicore"
+	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool/functiontool"
 )
 
 func TestSmoke_ToolCalling(t *testing.T) {
@@ -297,4 +299,85 @@ func TestSmoke_CustomHeaders(t *testing.T) {
 	if text == "" {
 		t.Error("empty response with custom headers")
 	}
+}
+
+// TestSmoke_FunctionToolNew_ParametersJsonSchema verifies that tools created via
+// ADK v2's functiontool.New (which sets ParametersJsonSchema instead of Parameters)
+// work end-to-end through the provider.
+func TestSmoke_FunctionToolNew_ParametersJsonSchema(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 30*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	type WeatherArgs struct {
+		City string `json:"city"`
+	}
+
+	type WeatherResult struct {
+		Temperature string `json:"temperature"`
+		Condition   string `json:"condition"`
+	}
+
+	wTool, err := functiontool.New[WeatherArgs, WeatherResult](
+		functiontool.Config{
+			Name:        "get_weather",
+			Description: "Get the current weather for a city",
+		},
+		func(_ agent.Context, args WeatherArgs) (WeatherResult, error) {
+			return WeatherResult{Temperature: "20°C", Condition: "cloudy"}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("functiontool.New: %v", err)
+	}
+
+	// functiontool.New returns tool.Tool; Declaration() is on the concrete type.
+	type declarator interface {
+		Declaration() *genai.FunctionDeclaration
+	}
+
+	declTool, ok := wTool.(declarator)
+	if !ok {
+		t.Fatal("functiontool does not implement Declaration()")
+	}
+
+	decl := declTool.Declaration()
+
+	// Verify the precondition: functiontool sets ParametersJsonSchema, not Parameters.
+	if decl.ParametersJsonSchema == nil {
+		t.Fatal("precondition: functiontool.New should set ParametersJsonSchema")
+	}
+
+	if decl.Parameters != nil {
+		t.Fatal("precondition: functiontool.New should NOT set Parameters")
+	}
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "What's the weather in Paris?"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			Tools: []*genai.Tool{{
+				FunctionDeclarations: []*genai.FunctionDeclaration{decl},
+			}},
+		},
+	}
+
+	resp := generateOne(t, ctx, llm, req)
+	calls := requireFunctionCalls(t, resp)
+
+	if calls[0].Name != "get_weather" {
+		t.Errorf("function name = %q, want get_weather", calls[0].Name)
+	}
+
+	city, _ := calls[0].Args["city"].(string)
+	if !strings.Contains(strings.ToLower(city), "paris") {
+		t.Errorf("city = %q, want something containing 'paris'", city)
+	}
+
+	t.Logf("call=%s args=%v", calls[0].Name, calls[0].Args)
 }

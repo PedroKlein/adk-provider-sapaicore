@@ -284,6 +284,130 @@ func TestTools_SkipsNilTools(t *testing.T) {
 	}
 }
 
+func TestTools_ParametersJsonSchema(t *testing.T) {
+	t.Parallel()
+
+	// Simulates what ADK v2 functiontool.New sets — a raw JSON schema object.
+	jsonSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"query": map[string]any{"type": "string"},
+		},
+		"required": []any{"query"},
+	}
+
+	tools := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{
+			{
+				Name:                 "search",
+				Description:          "Search for something",
+				ParametersJsonSchema: jsonSchema,
+			},
+		},
+	}}
+
+	defs := convert.Tools(tools)
+
+	if len(defs) != 1 {
+		t.Fatalf("len = %d, want 1", len(defs))
+	}
+
+	if defs[0].Function.Parameters == nil {
+		t.Fatal("Parameters is nil, want json schema pass-through")
+	}
+
+	// Verify it's the exact same object (pass-through, not transformed).
+	params, ok := defs[0].Function.Parameters.(map[string]any)
+	if !ok {
+		t.Fatalf("Parameters type = %T, want map[string]any", defs[0].Function.Parameters)
+	}
+
+	if params["type"] != "object" {
+		t.Errorf("params[type] = %v, want object", params["type"])
+	}
+
+	props, _ := params["properties"].(map[string]any)
+	if props == nil {
+		t.Fatal("expected properties in schema")
+	}
+
+	if _, hasQuery := props["query"]; !hasQuery {
+		t.Error("expected property 'query' in schema")
+	}
+}
+
+func TestTools_ParametersFieldTakesPrecedenceOverJsonSchema(t *testing.T) {
+	t.Parallel()
+
+	// If both are set (shouldn't happen per spec, but defensive), Parameters wins.
+	tools := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{
+			{
+				Name: "dual",
+				Parameters: &genai.Schema{
+					Type: "OBJECT",
+					Properties: map[string]*genai.Schema{
+						"x": {Type: "STRING"},
+					},
+				},
+				ParametersJsonSchema: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"y": map[string]any{"type": "number"}},
+				},
+			},
+		},
+	}}
+
+	defs := convert.Tools(tools)
+
+	if len(defs) != 1 {
+		t.Fatalf("len = %d, want 1", len(defs))
+	}
+
+	params, ok := defs[0].Function.Parameters.(map[string]any)
+	if !ok {
+		t.Fatalf("Parameters type = %T, want map[string]any", defs[0].Function.Parameters)
+	}
+
+	// Should contain 'x' from genai.Schema conversion, not 'y' from JsonSchema.
+	props, _ := params["properties"].(map[string]any)
+	if props == nil {
+		t.Fatal("expected properties from old-style Schema conversion")
+	}
+
+	if _, hasX := props["x"]; !hasX {
+		t.Error("expected property 'x' from Parameters (old-style Schema)")
+	}
+
+	if _, hasY := props["y"]; hasY {
+		t.Error("property 'y' from ParametersJsonSchema should not be present")
+	}
+}
+
+func TestTools_NilParametersBothFields(t *testing.T) {
+	t.Parallel()
+
+	// When neither field is set, params should be nil.
+	tools := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{
+			{
+				Name:        "no_params",
+				Description: "Tool without parameters",
+			},
+		},
+	}}
+
+	defs := convert.Tools(tools)
+
+	if len(defs) != 1 {
+		t.Fatalf("len = %d, want 1", len(defs))
+	}
+
+	if defs[0].Function.Parameters != nil {
+		t.Errorf("Parameters = %v, want nil", defs[0].Function.Parameters)
+	}
+}
+
 func TestResponseFormat_JSON(t *testing.T) {
 	t.Parallel()
 
