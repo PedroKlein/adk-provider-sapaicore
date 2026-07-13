@@ -12,10 +12,18 @@ import (
 	oai "github.com/PedroKlein/adk-provider-sapaicore/internal/openai"
 )
 
-func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, error) {
+func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, convert.ToolNameMapping, error) {
 	params, err := m.extractParams(req, doStream)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	// Orchestration API constraint: function names must match ^[a-zA-Z0-9-_]+$
+	var toolNameMapping convert.ToolNameMapping
+
+	if len(params.Tools) > 0 {
+		params.Tools, toolNameMapping = convert.SanitizeToolNames(params.Tools)
+		params.Messages = convert.SanitizeMessageToolNames(params.Messages, toolNameMapping)
 	}
 
 	modelParams := buildModelParams(params, doStream)
@@ -52,7 +60,7 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 
 	modulesJSON, err := m.marshalModules(moduleConfig, params, doStream)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	orchReq := oai.OrchestrationRequest{
@@ -73,10 +81,10 @@ func (m *Model) buildRequestBody(req *model.LLMRequest, doStream bool) ([]byte, 
 
 	body, err := json.Marshal(orchReq)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling orchestration request: %w", err)
+		return nil, nil, fmt.Errorf("marshaling orchestration request: %w", err)
 	}
 
-	return body, nil
+	return body, toolNameMapping, nil
 }
 
 func (m *Model) marshalModules(primary oai.ModuleConfigs, params oai.RequestParams, doStream bool) (json.RawMessage, error) {

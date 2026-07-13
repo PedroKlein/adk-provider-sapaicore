@@ -70,8 +70,7 @@ func functionDecl2ToolDef(decl *genai.FunctionDeclaration) oai.ToolDef {
 	case decl.Parameters != nil:
 		params = Schema(decl.Parameters)
 	case decl.ParametersJsonSchema != nil:
-		// ADK v2 functiontool sets ParametersJsonSchema (a *jsonschema.Schema)
-		// instead of Parameters. It's already JSON-serializable — pass through directly.
+		// Already JSON-serializable (*jsonschema.Schema from ADK v2 functiontool).
 		params = decl.ParametersJsonSchema
 	}
 

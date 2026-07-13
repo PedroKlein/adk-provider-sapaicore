@@ -61,12 +61,43 @@ func (c *Client) Execute(ctx context.Context, url string, body []byte) (*http.Re
 // to extract a structured API error message. Returns a formatted error wrapping
 // the given sentinel.
 func (c *Client) HandleError(resp *http.Response, sentinel error) error {
-	var errResp oai.FoundationResponse
-
 	limited := io.LimitReader(resp.Body, 1<<20)
-	if err := json.NewDecoder(limited).Decode(&errResp); err == nil && errResp.Error != nil {
+
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return fmt.Errorf("API returned status %d (failed to read body: %w): %w", resp.StatusCode, err, sentinel)
+	}
+
+	// Try foundation-models error format: {"error": {"message": ...}}
+	var errResp oai.FoundationResponse
+	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil {
 		return fmt.Errorf("API error %d: %s: %w", resp.StatusCode, errResp.Error.Message, sentinel)
 	}
 
-	return fmt.Errorf("API returned status %d: %w", resp.StatusCode, sentinel)
+	// Try orchestration error format: {"message": ..., "code": ...} or similar.
+	var orchErr struct {
+		Message string `json:"message"`
+		Code    int    `json:"code"`
+		Error   string `json:"error"`
+	}
+
+	if err := json.Unmarshal(body, &orchErr); err == nil {
+		if orchErr.Message != "" {
+			return fmt.Errorf("API error %d: %s: %w", resp.StatusCode, orchErr.Message, sentinel)
+		}
+
+		if orchErr.Error != "" {
+			return fmt.Errorf("API error %d: %s: %w", resp.StatusCode, orchErr.Error, sentinel)
+		}
+	}
+
+	// Fallback: include raw body (truncated) for debugging.
+	const maxBody = 512
+
+	snippet := body
+	if len(snippet) > maxBody {
+		snippet = snippet[:maxBody]
+	}
+
+	return fmt.Errorf("API returned status %d: %s...: %w", resp.StatusCode, snippet, sentinel)
 }

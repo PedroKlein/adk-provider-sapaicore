@@ -381,3 +381,124 @@ func TestSmoke_FunctionToolNew_ParametersJsonSchema(t *testing.T) {
 
 	t.Logf("call=%s args=%v", calls[0].Name, calls[0].Args)
 }
+
+// TestSmoke_DottedToolName verifies that tool names with dots (e.g. "github.read-pr")
+// work through orchestration mode, which requires ^[a-zA-Z0-9-_]+$ names.
+func TestSmoke_DottedToolName(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 30*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Read PR #42 from owner/repo using the github.read-pr tool"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			Tools: []*genai.Tool{{
+				FunctionDeclarations: []*genai.FunctionDeclaration{{
+					Name:        "github.read-pr",
+					Description: "Read pull request metadata",
+					Parameters: &genai.Schema{
+						Type: genai.TypeObject,
+						Properties: map[string]*genai.Schema{
+							"owner":  {Type: genai.TypeString, Description: "Repository owner"},
+							"repo":   {Type: genai.TypeString, Description: "Repository name"},
+							"number": {Type: genai.TypeInteger, Description: "PR number"},
+						},
+						Required: []string{"owner", "repo", "number"},
+					},
+				}},
+			}},
+		},
+	}
+
+	resp := generateOne(t, ctx, llm, req)
+	calls := requireFunctionCalls(t, resp)
+
+	if calls[0].Name != "github.read-pr" {
+		t.Errorf("function name = %q, want github.read-pr (dot restored)", calls[0].Name)
+	}
+
+	t.Logf("call=%s args=%v", calls[0].Name, calls[0].Args)
+}
+
+// TestSmoke_DottedToolName_MultiTurn verifies that multi-turn tool calling works
+// with dotted tool names. The second request includes the assistant's prior FunctionCall
+// (with the restored dotted name) in the conversation history — the provider must
+// re-sanitize it in the outbound messages to match the sanitized tool definitions.
+func TestSmoke_DottedToolName_MultiTurn(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 60*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	prTool := &genai.Tool{
+		FunctionDeclarations: []*genai.FunctionDeclaration{{
+			Name:        "github.read-pr",
+			Description: "Read pull request metadata from GitHub",
+			Parameters: &genai.Schema{
+				Type: genai.TypeObject,
+				Properties: map[string]*genai.Schema{
+					"owner":  {Type: genai.TypeString, Description: "Repository owner"},
+					"repo":   {Type: genai.TypeString, Description: "Repository name"},
+					"number": {Type: genai.TypeInteger, Description: "PR number"},
+				},
+				Required: []string{"owner", "repo", "number"},
+			},
+		}},
+	}
+
+	// Step 1: Model calls the dotted tool.
+	req1 := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Read PR #42 from octocat/hello-world using the github.read-pr tool"}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{Tools: []*genai.Tool{prTool}},
+	}
+
+	resp1 := generateOne(t, ctx, llm, req1)
+	calls := requireFunctionCalls(t, resp1)
+
+	if calls[0].Name != "github.read-pr" {
+		t.Fatalf("step 1: function name = %q, want github.read-pr", calls[0].Name)
+	}
+
+	t.Logf("step 1: model called %s(%v)", calls[0].Name, calls[0].Args)
+
+	// Step 2: Send the tool result back — this is the multi-turn request that
+	// includes the assistant's prior FunctionCall with the dotted name in history.
+	req2 := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Read PR #42 from octocat/hello-world using the github.read-pr tool"}}, Role: "user"},
+			{Parts: []*genai.Part{{FunctionCall: calls[0]}}, Role: "model"},
+			{Parts: []*genai.Part{{FunctionResponse: &genai.FunctionResponse{
+				ID:   calls[0].ID,
+				Name: calls[0].Name,
+				Response: map[string]any{
+					"title":  "Fix typo in README",
+					"state":  "open",
+					"author": "octocat",
+				},
+			}}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{Tools: []*genai.Tool{prTool}},
+	}
+
+	resp2 := generateOne(t, ctx, llm, req2)
+
+	text := requireText(t, resp2)
+	lower := strings.ToLower(text)
+
+	if !strings.Contains(lower, "typo") && !strings.Contains(lower, "readme") && !strings.Contains(lower, "42") {
+		t.Errorf("step 2: model didn't synthesize tool result: %q", text)
+	}
+
+	t.Logf("step 2: final answer=%q", text)
+}

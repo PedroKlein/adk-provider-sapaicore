@@ -56,7 +56,7 @@ func (m *Model) GenerateContent(ctx context.Context, req *model.LLMRequest, doSt
 
 func (m *Model) generate(ctx context.Context, req *model.LLMRequest) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		body, err := m.buildRequestBody(req, false)
+		body, toolNameMapping, err := m.buildRequestBody(req, false)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -81,6 +81,7 @@ func (m *Model) generate(ctx context.Context, req *model.LLMRequest) iter.Seq2[*
 			return
 		}
 
+		restoreToolNames(llmResp, toolNameMapping)
 		llmResp.TurnComplete = true
 
 		yield(llmResp, nil)
@@ -89,7 +90,7 @@ func (m *Model) generate(ctx context.Context, req *model.LLMRequest) iter.Seq2[*
 
 func (m *Model) generateStream(ctx context.Context, req *model.LLMRequest) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
-		body, err := m.buildRequestBody(req, true)
+		body, toolNameMapping, err := m.buildRequestBody(req, true)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -129,6 +130,8 @@ func (m *Model) generateStream(ctx context.Context, req *model.LLMRequest) iter.
 
 			partial := agg.ProcessChunk(stream.ModeOrchestration, data)
 			if partial != nil {
+				restoreToolNames(partial, toolNameMapping)
+
 				if !yield(partial, nil) {
 					return
 				}
@@ -140,7 +143,10 @@ func (m *Model) generateStream(ctx context.Context, req *model.LLMRequest) iter.
 			return
 		}
 
-		yield(agg.Finalize(), nil)
+		final := agg.Finalize()
+		restoreToolNames(final, toolNameMapping)
+
+		yield(final, nil)
 	}
 }
 
@@ -188,4 +194,16 @@ func (m *Model) doHTTPRequest(ctx context.Context, body []byte) (*http.Response,
 func (m *Model) handleErrorResponse(resp *http.Response) error {
 	//nolint:wrapcheck // request is an internal package; error is already wrapped with sentinel
 	return m.Client.HandleError(resp, ErrInference)
+}
+
+func restoreToolNames(resp *model.LLMResponse, mapping convert.ToolNameMapping) {
+	if mapping == nil || resp == nil || resp.Content == nil {
+		return
+	}
+
+	for _, part := range resp.Content.Parts {
+		if part.FunctionCall != nil {
+			part.FunctionCall.Name = mapping.Restore(part.FunctionCall.Name)
+		}
+	}
 }
