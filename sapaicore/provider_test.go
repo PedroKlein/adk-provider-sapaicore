@@ -652,6 +652,174 @@ func TestOrchestration_FunctionResponseFormat(t *testing.T) {
 	}
 }
 
+func TestOrchestration_ParallelFunctionResponseFormat(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+
+	authServer := newMockAuthServer(t)
+
+	inferenceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		json.Unmarshal(body, &capturedBody)
+
+		writeOrchestrationResponse(w, "Berlin is 18°C and cloudy. Germany has 83.2 million people.", "stop")
+	}))
+	defer inferenceServer.Close()
+
+	provider, _ := sapaicore.NewProvider(t.Context(),
+		sapaicore.WithEndpoint(inferenceServer.URL),
+		sapaicore.WithAuth("id", "secret", authServer.URL+"/oauth/token"),
+		sapaicore.WithDeploymentID("orch-123"),
+	)
+
+	llm, _ := provider.Model("gpt-4.1-mini")
+
+	// Simulate parallel tool call round-trip: user → assistant(2 tool_calls) → 2 tool results.
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "What is the weather in Berlin and population of Germany?"}}, Role: "user"},
+			// Model returned parallel tool calls
+			{Parts: []*genai.Part{
+				{FunctionCall: &genai.FunctionCall{
+					ID:   "call_AAA111",
+					Name: "get_weather",
+					Args: map[string]any{"city": "Berlin"},
+				}},
+				{FunctionCall: &genai.FunctionCall{
+					ID:   "call_BBB222",
+					Name: "get_population",
+					Args: map[string]any{"country": "Germany"},
+				}},
+			}, Role: "model"},
+			// Tool results (merged by ADK for parallel execution)
+			{Parts: []*genai.Part{
+				{FunctionResponse: &genai.FunctionResponse{
+					ID:       "call_AAA111",
+					Name:     "get_weather",
+					Response: map[string]any{"temperature": "18°C", "condition": "cloudy"},
+				}},
+				{FunctionResponse: &genai.FunctionResponse{
+					ID:       "call_BBB222",
+					Name:     "get_population",
+					Response: map[string]any{"population": "83.2 million"},
+				}},
+			}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			SystemInstruction: &genai.Content{
+				Parts: []*genai.Part{{Text: "You are a helpful assistant."}},
+			},
+			Tools: []*genai.Tool{{
+				FunctionDeclarations: []*genai.FunctionDeclaration{
+					{Name: "get_weather", Description: "Get weather"},
+					{Name: "get_population", Description: "Get population"},
+				},
+			}},
+		},
+	}
+
+	ctx := t.Context()
+
+	for resp, err := range llm.GenerateContent(ctx, req, false) {
+		if err != nil {
+			t.Fatalf("GenerateContent: %v", err)
+		}
+
+		_ = resp
+	}
+
+	// Verify the wire format of the captured request body.
+	cfg, _ := capturedBody["config"].(map[string]any)
+	modules, _ := cfg["modules"].(map[string]any)
+	pt, _ := modules["prompt_templating"].(map[string]any)
+	prompt, _ := pt["prompt"].(map[string]any)
+	template, _ := prompt["template"].([]any)
+
+	// Expected: system + user + assistant(2 tool_calls) + tool + tool = 5 messages
+	if len(template) != 5 {
+		t.Fatalf("expected 5 template messages, got %d", len(template))
+	}
+
+	// msg[0]: system
+	sysMsg, _ := template[0].(map[string]any)
+	if sysMsg["role"] != "system" {
+		t.Errorf("template[0] role = %v, want system", sysMsg["role"])
+	}
+
+	// msg[1]: user
+	userMsg, _ := template[1].(map[string]any)
+	if userMsg["role"] != "user" {
+		t.Errorf("template[1] role = %v, want user", userMsg["role"])
+	}
+
+	// msg[2]: assistant with 2 tool_calls
+	assistantMsg, _ := template[2].(map[string]any)
+	if assistantMsg["role"] != "assistant" {
+		t.Errorf("template[2] role = %v, want assistant", assistantMsg["role"])
+	}
+
+	// Assistant content field must be present (can be null or empty string).
+	if _, hasContent := assistantMsg["content"]; !hasContent {
+		t.Error("assistant message missing content field")
+	}
+
+	toolCalls, _ := assistantMsg["tool_calls"].([]any)
+	if len(toolCalls) != 2 {
+		t.Fatalf("expected 2 tool_calls, got %d", len(toolCalls))
+	}
+
+	// Verify tool call IDs
+	tc0, _ := toolCalls[0].(map[string]any)
+	tc1, _ := toolCalls[1].(map[string]any)
+
+	if tc0["id"] != "call_AAA111" {
+		t.Errorf("tool_calls[0].id = %v, want call_AAA111", tc0["id"])
+	}
+
+	if tc1["id"] != "call_BBB222" {
+		t.Errorf("tool_calls[1].id = %v, want call_BBB222", tc1["id"])
+	}
+
+	// Verify each tool call has type and function fields
+	for i, tc := range []map[string]any{tc0, tc1} {
+		if tc["type"] != "function" {
+			t.Errorf("tool_calls[%d].type = %v, want function", i, tc["type"])
+		}
+
+		// The 'id' field MUST be present (not omitted) — the orchestration API
+		// requires it. This verifies the omitempty fix.
+		if _, hasID := tc["id"]; !hasID {
+			t.Errorf("tool_calls[%d] missing 'id' field (must not be omitted)", i)
+		}
+
+		fn, _ := tc["function"].(map[string]any)
+		if fn == nil {
+			t.Fatalf("tool_calls[%d].function is nil", i)
+		}
+	}
+
+	// msg[3]: first tool result
+	toolMsg0, _ := template[3].(map[string]any)
+	if toolMsg0["role"] != "tool" {
+		t.Errorf("template[3] role = %v, want tool", toolMsg0["role"])
+	}
+
+	if toolMsg0["tool_call_id"] != "call_AAA111" {
+		t.Errorf("template[3] tool_call_id = %v, want call_AAA111", toolMsg0["tool_call_id"])
+	}
+
+	// msg[4]: second tool result
+	toolMsg1, _ := template[4].(map[string]any)
+	if toolMsg1["role"] != "tool" {
+		t.Errorf("template[4] role = %v, want tool", toolMsg1["role"])
+	}
+
+	if toolMsg1["tool_call_id"] != "call_BBB222" {
+		t.Errorf("template[4] tool_call_id = %v, want call_BBB222", toolMsg1["tool_call_id"])
+	}
+}
+
 func TestOrchestration_RefusalHandling(t *testing.T) {
 	t.Parallel()
 

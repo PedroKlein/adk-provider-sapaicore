@@ -59,7 +59,7 @@ type FileContent struct {
 // ToolCall represents a function call requested by the model.
 type ToolCall struct {
 	Index    int          `json:"index,omitempty"`
-	ID       string       `json:"id,omitempty"`
+	ID       string       `json:"id"`
 	Type     string       `json:"type,omitempty"`
 	Function FunctionCall `json:"function"`
 }

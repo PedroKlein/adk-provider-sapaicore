@@ -1016,3 +1016,138 @@ func TestChoiceToResponse_Logprobs(t *testing.T) {
 		})
 	}
 }
+
+func TestMessages_ParallelToolCalls_EmptyIDs(t *testing.T) {
+	t.Parallel()
+
+	contents := []*genai.Content{
+		{Parts: []*genai.Part{{Text: "hello"}}, Role: "user"},
+		{Parts: []*genai.Part{
+			{FunctionCall: &genai.FunctionCall{ID: "", Name: "tool_a", Args: map[string]any{"x": 1}}},
+			{FunctionCall: &genai.FunctionCall{ID: "", Name: "tool_b", Args: map[string]any{"y": 2}}},
+		}, Role: "model"},
+		{Parts: []*genai.Part{
+			{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "tool_a", Response: map[string]any{"r": "a"}}},
+			{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "tool_b", Response: map[string]any{"r": "b"}}},
+		}, Role: "user"},
+	}
+
+	msgs, err := convert.Messages(nil, contents)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+
+	if len(msgs) != 4 {
+		t.Fatalf("len = %d, want 4", len(msgs))
+	}
+
+	if msgs[1].ToolCalls[0].ID == "" {
+		t.Error("tool_calls[0].ID is empty after correlation")
+	}
+
+	if msgs[1].ToolCalls[1].ID == "" {
+		t.Error("tool_calls[1].ID is empty after correlation")
+	}
+
+	if msgs[1].ToolCalls[0].ID == msgs[1].ToolCalls[1].ID {
+		t.Errorf("tool_calls have duplicate IDs: %q", msgs[1].ToolCalls[0].ID)
+	}
+
+	if msgs[2].ToolCallID != msgs[1].ToolCalls[0].ID {
+		t.Errorf("tool[0] ID = %q, want %q", msgs[2].ToolCallID, msgs[1].ToolCalls[0].ID)
+	}
+
+	if msgs[3].ToolCallID != msgs[1].ToolCalls[1].ID {
+		t.Errorf("tool[1] ID = %q, want %q", msgs[3].ToolCallID, msgs[1].ToolCalls[1].ID)
+	}
+}
+
+func TestMessages_ParallelToolCalls_EmptyIDs_MultiTurn(t *testing.T) {
+	t.Parallel()
+
+	contents := []*genai.Content{
+		{Parts: []*genai.Part{{Text: "hello"}}, Role: "user"},
+		{Parts: []*genai.Part{
+			{FunctionCall: &genai.FunctionCall{ID: "", Name: "a", Args: map[string]any{}}},
+			{FunctionCall: &genai.FunctionCall{ID: "", Name: "b", Args: map[string]any{}}},
+		}, Role: "model"},
+		{Parts: []*genai.Part{
+			{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "a", Response: map[string]any{}}},
+			{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "b", Response: map[string]any{}}},
+		}, Role: "user"},
+		{Parts: []*genai.Part{
+			{FunctionCall: &genai.FunctionCall{ID: "", Name: "c", Args: map[string]any{}}},
+			{FunctionCall: &genai.FunctionCall{ID: "", Name: "d", Args: map[string]any{}}},
+		}, Role: "model"},
+		{Parts: []*genai.Part{
+			{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "c", Response: map[string]any{}}},
+			{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "d", Response: map[string]any{}}},
+		}, Role: "user"},
+	}
+
+	msgs, err := convert.Messages(nil, contents)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+
+	seen := make(map[string]bool)
+
+	for _, msg := range msgs {
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == "" {
+				t.Error("tool_call with empty ID after correlation")
+			}
+
+			if seen[tc.ID] {
+				t.Errorf("duplicate synthetic ID %q across turns", tc.ID)
+			}
+
+			seen[tc.ID] = true
+		}
+
+		if msg.Role == "tool" && msg.ToolCallID == "" {
+			t.Error("tool message with empty ToolCallID after correlation")
+		}
+	}
+}
+
+func TestMessages_ParallelToolCalls_MixedIDs(t *testing.T) {
+	t.Parallel()
+
+	contents := []*genai.Content{
+		{Parts: []*genai.Part{{Text: "hi"}}, Role: "user"},
+		{Parts: []*genai.Part{
+			{FunctionCall: &genai.FunctionCall{ID: "call_real_abc", Name: "a", Args: map[string]any{}}},
+			{FunctionCall: &genai.FunctionCall{ID: "", Name: "b", Args: map[string]any{}}},
+		}, Role: "model"},
+		{Parts: []*genai.Part{
+			{FunctionResponse: &genai.FunctionResponse{ID: "call_real_abc", Name: "a", Response: map[string]any{}}},
+			{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "b", Response: map[string]any{}}},
+		}, Role: "user"},
+	}
+
+	msgs, err := convert.Messages(nil, contents)
+	if err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+
+	if msgs[1].ToolCalls[0].ID != "call_real_abc" {
+		t.Errorf("tool_calls[0].ID = %q, want call_real_abc", msgs[1].ToolCalls[0].ID)
+	}
+
+	if msgs[1].ToolCalls[1].ID == "" {
+		t.Error("tool_calls[1].ID is empty")
+	}
+
+	if msgs[1].ToolCalls[1].ID == "call_real_abc" {
+		t.Error("synthetic ID collides with the real ID")
+	}
+
+	if msgs[2].ToolCallID != "call_real_abc" {
+		t.Errorf("tool[0] ToolCallID = %q, want call_real_abc", msgs[2].ToolCallID)
+	}
+
+	if msgs[3].ToolCallID != msgs[1].ToolCalls[1].ID {
+		t.Errorf("tool[1] ToolCallID = %q, want %q", msgs[3].ToolCallID, msgs[1].ToolCalls[1].ID)
+	}
+}

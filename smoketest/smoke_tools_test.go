@@ -181,6 +181,355 @@ func TestSmoke_ToolRoundTrip(t *testing.T) {
 	t.Logf("response=%q", text)
 }
 
+func TestSmoke_ParallelToolRoundTrip(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 60*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	toolDefs := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{
+			{
+				Name:        "get_weather",
+				Description: "Get current weather for a city",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"city": {Type: genai.TypeString},
+					},
+					Required: []string{"city"},
+				},
+			},
+			{
+				Name:        "get_population",
+				Description: "Get the population of a country",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"country": {Type: genai.TypeString},
+					},
+					Required: []string{"country"},
+				},
+			},
+		},
+	}}
+
+	// Step 1: Ask a question that requires both tools → model returns parallel calls.
+	req1 := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Get the weather in Berlin AND get the population of Germany. Use both tools."}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			Tools: toolDefs,
+		},
+	}
+
+	resp1 := generateOne(t, ctx, llm, req1)
+	calls := requireFunctionCalls(t, resp1)
+
+	if len(calls) < 2 {
+		t.Skipf("model returned %d calls (need 2 for parallel test); skipping", len(calls))
+	}
+
+	for i, call := range calls {
+		t.Logf("step 1: call[%d] = %s(id=%s, args=%v)", i, call.Name, call.ID, call.Args)
+	}
+
+	// Step 2: Send tool results back using the IDs from the API response.
+	// This is the step that triggers the 400 error in the bug report.
+	var responseParts []*genai.Part
+	for _, call := range calls {
+		var result map[string]any
+		switch call.Name {
+		case "get_weather":
+			result = map[string]any{"temperature": "18°C", "condition": "cloudy"}
+		case "get_population":
+			result = map[string]any{"population": "83.2 million"}
+		default:
+			result = map[string]any{"result": "unknown tool"}
+		}
+
+		responseParts = append(responseParts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       call.ID,
+				Name:     call.Name,
+				Response: result,
+			},
+		})
+	}
+
+	req2 := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Get the weather in Berlin AND get the population of Germany. Use both tools."}}, Role: "user"},
+			// The model's response with parallel tool calls
+			{Parts: func() []*genai.Part {
+				var parts []*genai.Part
+				for _, call := range calls {
+					parts = append(parts, &genai.Part{FunctionCall: call})
+				}
+				return parts
+			}(), Role: "model"},
+			// Tool results (merged, as ADK does for parallel calls)
+			{Parts: responseParts, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{
+			Tools: toolDefs,
+		},
+	}
+
+	resp2 := generateOne(t, ctx, llm, req2)
+
+	text := requireText(t, resp2)
+	t.Logf("step 2: response=%q", text)
+
+	lower := strings.ToLower(text)
+	if !strings.Contains(lower, "18") && !strings.Contains(lower, "cloudy") && !strings.Contains(lower, "83") {
+		t.Errorf("model didn't synthesize parallel tool results: %q", text)
+	}
+}
+
+func TestSmoke_ParallelToolRoundTrip_Streaming(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 60*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	toolDefs := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{
+			{
+				Name:        "get_weather",
+				Description: "Get current weather for a city",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"city": {Type: genai.TypeString},
+					},
+					Required: []string{"city"},
+				},
+			},
+			{
+				Name:        "get_population",
+				Description: "Get the population of a country",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"country": {Type: genai.TypeString},
+					},
+					Required: []string{"country"},
+				},
+			},
+		},
+	}}
+
+	// Step 1: streaming — get parallel tool calls
+	_, resp1 := generateStream(t, ctx, llm, &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Get the weather in Berlin AND get the population of Germany. Use both tools."}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{Tools: toolDefs},
+	})
+
+	calls := requireFunctionCalls(t, resp1)
+	if len(calls) < 2 {
+		t.Skipf("model returned %d calls (need 2 for parallel test); skipping", len(calls))
+	}
+
+	for i, call := range calls {
+		t.Logf("step 1: call[%d] = %s(id=%s)", i, call.Name, call.ID)
+	}
+
+	// Step 2: streaming — send results back with API-returned IDs
+	var responseParts []*genai.Part
+	for _, call := range calls {
+		var result map[string]any
+		switch call.Name {
+		case "get_weather":
+			result = map[string]any{"temperature": "18°C", "condition": "cloudy"}
+		case "get_population":
+			result = map[string]any{"population": "83.2 million"}
+		default:
+			result = map[string]any{"result": "unknown"}
+		}
+		responseParts = append(responseParts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       call.ID,
+				Name:     call.Name,
+				Response: result,
+			},
+		})
+	}
+
+	req2 := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Get the weather in Berlin AND get the population of Germany. Use both tools."}}, Role: "user"},
+			{Parts: func() []*genai.Part {
+				var parts []*genai.Part
+				for _, call := range calls {
+					parts = append(parts, &genai.Part{FunctionCall: call})
+				}
+				return parts
+			}(), Role: "model"},
+			{Parts: responseParts, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{Tools: toolDefs},
+	}
+
+	_, resp2 := generateStream(t, ctx, llm, req2)
+	text := requireText(t, resp2)
+	t.Logf("step 2 (streaming): response=%q", text)
+
+	lower := strings.ToLower(text)
+	if !strings.Contains(lower, "18") && !strings.Contains(lower, "cloudy") && !strings.Contains(lower, "83") {
+		t.Errorf("model didn't synthesize parallel tool results: %q", text)
+	}
+}
+
+func TestSmoke_ParallelToolRoundTrip_DottedNames(t *testing.T) {
+	provider := newProvider(t)
+	ctx := withTimeout(t, 60*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	// Uses dotted tool names like duto-ai workflows: files.find, files.grep
+	// The orchestration API requires ^[a-zA-Z0-9-_]+$ so dots get sanitized.
+	toolDefs := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{
+			{
+				Name:        "files.find",
+				Description: "Find files matching a pattern",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"pattern": {Type: genai.TypeString},
+					},
+					Required: []string{"pattern"},
+				},
+			},
+			{
+				Name:        "files.grep",
+				Description: "Search file contents for a pattern",
+				Parameters: &genai.Schema{
+					Type: genai.TypeObject,
+					Properties: map[string]*genai.Schema{
+						"pattern": {Type: genai.TypeString},
+					},
+					Required: []string{"pattern"},
+				},
+			},
+		},
+	}}
+
+	// Step 1: get parallel calls with dotted names
+	req1 := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Find all .go files AND grep for TODO comments. Use both tools in parallel."}}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{Tools: toolDefs},
+	}
+
+	resp1 := generateOne(t, ctx, llm, req1)
+	calls := requireFunctionCalls(t, resp1)
+
+	if len(calls) < 2 {
+		t.Skipf("model returned %d calls (need 2 for parallel test); skipping", len(calls))
+	}
+
+	for i, call := range calls {
+		t.Logf("step 1: call[%d] = %s(id=%s, args=%v)", i, call.Name, call.ID, call.Args)
+	}
+
+	// Step 2: send results back. Tool names come back with dots restored by the provider.
+	var responseParts []*genai.Part
+	for _, call := range calls {
+		var result map[string]any
+		switch call.Name {
+		case "files.find", "files__find":
+			result = map[string]any{"files": []string{"main.go", "lib.go", "handler.go"}}
+		case "files.grep", "files__grep":
+			result = map[string]any{"matches": []string{"main.go:10: // TODO fix error handling"}}
+		default:
+			result = map[string]any{"result": "unknown tool: " + call.Name}
+		}
+		responseParts = append(responseParts, &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       call.ID,
+				Name:     call.Name,
+				Response: result,
+			},
+		})
+	}
+
+	req2 := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Find all .go files AND grep for TODO comments. Use both tools in parallel."}}, Role: "user"},
+			{Parts: func() []*genai.Part {
+				var parts []*genai.Part
+				for _, call := range calls {
+					parts = append(parts, &genai.Part{FunctionCall: call})
+				}
+				return parts
+			}(), Role: "model"},
+			{Parts: responseParts, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{Tools: toolDefs},
+	}
+
+	resp2 := generateOne(t, ctx, llm, req2)
+	text := requireText(t, resp2)
+	t.Logf("step 2 (dotted names): response=%q", text)
+}
+
+func TestSmoke_ParallelToolRoundTrip_EmptyIDs(t *testing.T) {
+	// Tests the scenario where tool_call IDs are empty (as happens when ADK's
+	// RemoveClientFunctionCallID strips adk-prefixed IDs and the provider didn't
+	// return its own IDs). This simulates the ADK runner flow.
+	provider := newProvider(t)
+	ctx := withTimeout(t, 60*time.Second)
+
+	llm, err := provider.Model("gpt-4.1-mini")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	toolDefs := []*genai.Tool{{
+		FunctionDeclarations: []*genai.FunctionDeclaration{
+			{Name: "get_weather", Description: "Get current weather for a city",
+				Parameters: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{"city": {Type: genai.TypeString}}, Required: []string{"city"}}},
+			{Name: "get_population", Description: "Get the population of a country",
+				Parameters: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{"country": {Type: genai.TypeString}}, Required: []string{"country"}}},
+		},
+	}}
+
+	// Simulate ADK flow where IDs were stripped (empty).
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			{Parts: []*genai.Part{{Text: "Weather in Berlin and population of Germany?"}}, Role: "user"},
+			{Parts: []*genai.Part{
+				{FunctionCall: &genai.FunctionCall{ID: "", Name: "get_weather", Args: map[string]any{"city": "Berlin"}}},
+				{FunctionCall: &genai.FunctionCall{ID: "", Name: "get_population", Args: map[string]any{"country": "Germany"}}},
+			}, Role: "model"},
+			{Parts: []*genai.Part{
+				{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "get_weather", Response: map[string]any{"temperature": "18°C"}}},
+				{FunctionResponse: &genai.FunctionResponse{ID: "", Name: "get_population", Response: map[string]any{"population": "83M"}}},
+			}, Role: "user"},
+		},
+		Config: &genai.GenerateContentConfig{Tools: toolDefs},
+	}
+
+	resp := generateOne(t, ctx, llm, req)
+	text := requireText(t, resp)
+	t.Logf("response (empty IDs): %q", text)
+}
+
 func TestSmoke_ToolCalling_MultiModel(t *testing.T) {
 	provider := newProvider(t)
 

@@ -31,6 +31,8 @@ func Messages(systemInstruction *genai.Content, contents []*genai.Content) ([]oa
 		messages = append(messages, msgs...)
 	}
 
+	correlateEmptyToolCallIDs(messages)
+
 	return messages, nil
 }
 
@@ -189,3 +191,52 @@ func MapRole(role string) string {
 }
 
 func strPtr(s string) *string { return &s }
+
+// correlateEmptyToolCallIDs assigns synthetic IDs when tool_calls or tool
+// result messages have empty IDs (stripped by ADK's RemoveClientFunctionCallID).
+func correlateEmptyToolCallIDs(messages []oai.ChatMessage) {
+	seq := 0
+
+	for i := range messages {
+		if messages[i].Role != "assistant" || len(messages[i].ToolCalls) == 0 {
+			continue
+		}
+
+		needsIDs := false
+
+		for _, tc := range messages[i].ToolCalls {
+			if tc.ID == "" {
+				needsIDs = true
+				break
+			}
+		}
+
+		if !needsIDs {
+			continue
+		}
+
+		for j := range messages[i].ToolCalls {
+			if messages[i].ToolCalls[j].ID == "" {
+				messages[i].ToolCalls[j].ID = fmt.Sprintf("call_%d", seq)
+				seq++
+			}
+		}
+
+		toolIdx := 0
+		for k := i + 1; k < len(messages) && toolIdx < len(messages[i].ToolCalls); k++ {
+			if messages[k].Role == "assistant" {
+				break
+			}
+
+			if messages[k].Role != "tool" {
+				continue
+			}
+
+			if messages[k].ToolCallID == "" {
+				messages[k].ToolCallID = messages[i].ToolCalls[toolIdx].ID
+			}
+
+			toolIdx++
+		}
+	}
+}
